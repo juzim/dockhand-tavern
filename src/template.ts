@@ -12,10 +12,27 @@ import { getUniqueStacks, getUniqueEnvironments } from './utils';
 function renderCard(container: ProcessedContainer): string {
   const genericIconUrl = 'https://cdn.jsdelivr.net/gh/selfhst/icons/png/docker.png';
   const hasSinglePort = container.ports.length === 1;
-  const primaryUrl = hasSinglePort ? container.ports[0].url : '#';
+  const primaryUrl = hasSinglePort ? (container.customUrl || container.ports[0].url) : '#';
   
   return `
     <div class="card" data-stack="${container.stack}" data-env="${container.environment.name}">
+      <a href="/?stack=${encodeURIComponent(container.stack)}"
+         class="stack-label"
+         data-filter-type="stack"
+         data-filter-value="${escapeHtml(container.stack)}"
+         title="Filter by: ${escapeHtml(container.stack)}">
+        ${escapeHtml(container.stack)}
+      </a>
+      
+      <a href="/?env=${encodeURIComponent(container.environment.name)}" 
+         class="ribbon ribbon-env"
+         data-filter-type="env"
+         data-filter-value="${escapeHtml(container.environment.name)}"
+         data-env-name="${escapeHtml(container.environment.name)}"
+         title="Filter by: ${escapeHtml(container.environment.name)}">
+        ${escapeHtml(container.environment.name)}
+      </a>
+      
       <div class="card-header">
         <img 
           src="${escapeHtml(container.iconUrl)}" 
@@ -42,23 +59,6 @@ function renderCard(container: ProcessedContainer): string {
             .join('<span class="port-separator">•</span>')}
         </div>
       ` : ''}
-      
-      <div class="card-labels">
-        <a href="/?stack=${encodeURIComponent(container.stack)}" 
-           class="badge badge-stack" 
-           data-filter-type="stack"
-           data-filter-value="${escapeHtml(container.stack)}"
-           title="Click to toggle filter: ${escapeHtml(container.stack)}">
-          ${escapeHtml(container.stack)}
-        </a>
-        <a href="/?env=${encodeURIComponent(container.environment.name)}" 
-           class="badge badge-env"
-           data-filter-type="env"
-           data-filter-value="${escapeHtml(container.environment.name)}"
-           title="Click to toggle filter: ${escapeHtml(container.environment.name)}">
-          ${escapeHtml(container.environment.name)}
-        </a>
-      </div>
     </div>
   `;
 }
@@ -70,7 +70,10 @@ export function renderDashboard(
   data: CacheData,
   filters: FilterOptions = {}
 ): string {
-  const allContainers = data.containers;
+  // Sort containers by display name
+  const allContainers = [...data.containers].sort((a, b) => 
+    a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' })
+  );
   const stacks = getUniqueStacks(allContainers);
   const environments = getUniqueEnvironments(allContainers);
 

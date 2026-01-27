@@ -14,6 +14,36 @@
   const resetBtn = document.getElementById('reset-filters');
 
   /**
+   * Generate consistent color for environment name using hash
+   */
+  function getEnvColor(envName) {
+    const colors = [
+      'blue', 'peach', 'yellow', 'green', 
+      'red', 'teal', 'sky', 'pink'
+    ];
+    
+    // Generate deterministic hash from environment name
+    const hash = envName.split('').reduce((acc, char) => {
+      return acc + char.charCodeAt(0);
+    }, 0);
+    
+    return colors[hash % colors.length];
+  }
+
+  /**
+   * Apply dynamic colors to environment ribbons
+   */
+  function applyEnvColors() {
+    document.querySelectorAll('.ribbon-env').forEach(ribbon => {
+      const envName = ribbon.dataset.envName;
+      if (envName) {
+        const color = getEnvColor(envName);
+        ribbon.classList.add(`ribbon-env-color-${color}`);
+      }
+    });
+  }
+
+  /**
    * Update URL search params without reloading page
    */
   function updateUrlWithoutReload(filters) {
@@ -33,23 +63,23 @@
     const currentStack = stackFilter ? stackFilter.value : '';
     const currentEnv = envFilter ? envFilter.value : '';
     
-    // Update all stack badges
-    document.querySelectorAll('.badge-stack').forEach(badge => {
-      const badgeValue = badge.dataset.filterValue;
-      if (badgeValue === currentStack) {
-        badge.classList.add('badge-active');
+    // Update all stack labels
+    document.querySelectorAll('.stack-label').forEach(label => {
+      const labelValue = label.dataset.filterValue;
+      if (labelValue === currentStack) {
+        label.classList.add('badge-active');
       } else {
-        badge.classList.remove('badge-active');
+        label.classList.remove('badge-active');
       }
     });
     
-    // Update all env badges
-    document.querySelectorAll('.badge-env').forEach(badge => {
-      const badgeValue = badge.dataset.filterValue;
-      if (badgeValue === currentEnv) {
-        badge.classList.add('badge-active');
+    // Update all env ribbons
+    document.querySelectorAll('.ribbon-env').forEach(ribbon => {
+      const ribbonValue = ribbon.dataset.filterValue;
+      if (ribbonValue === currentEnv) {
+        ribbon.classList.add('badge-active');
       } else {
-        badge.classList.remove('badge-active');
+        ribbon.classList.remove('badge-active');
       }
     });
   }
@@ -247,18 +277,19 @@
   }
 
   /**
-   * Handle badge clicks for toggling filters
+   * Handle ribbon and label clicks for toggling filters
    */
   function initBadgeFilters() {
-    const badges = document.querySelectorAll('.badge[data-filter-type]');
+    // Handle both ribbons and stack labels
+    const filterElements = document.querySelectorAll('.ribbon[data-filter-type], .stack-label[data-filter-type]');
     
-    badges.forEach(badge => {
-      badge.addEventListener('click', (e) => {
+    filterElements.forEach(element => {
+      element.addEventListener('click', (e) => {
         e.preventDefault();
         
-        const filterType = badge.dataset.filterType;
-        const filterValue = badge.dataset.filterValue;
-        const isActive = badge.classList.contains('badge-active');
+        const filterType = element.dataset.filterType;
+        const filterValue = element.dataset.filterValue;
+        const isActive = element.classList.contains('badge-active');
         
         if (isActive) {
           // Remove this filter
@@ -281,6 +312,9 @@
       });
     });
   }
+
+  // Apply environment colors
+  applyEnvColors();
 
   // Initialize badge filters
   initBadgeFilters();

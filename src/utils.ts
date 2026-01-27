@@ -35,26 +35,27 @@ export function extractPorts(ports: DockhandPort[]): number[] {
 
 /**
  * Build access URL for a container port
- * Uses homepage.href if available, otherwise constructs URL
+ * Uses dockhand-tavern.href or homepage.href if available, otherwise constructs URL
  */
 export function buildPortUrl(
   container: DockhandContainer,
   port: number,
   envPublicIp: string
 ): string {
-  // Check for custom homepage URL
-  const homepageHref = container.labels?.['homepage.href'];
+  // Check for custom URL (dockhand-tavern.href takes priority)
+  const customHref = container.labels?.['dockhand-tavern.href'] || 
+                     container.labels?.['homepage.href'];
 
-  if (homepageHref) {
-    // Use homepage.href if it matches this port
+  if (customHref) {
+    // Use custom href if it matches this port
     try {
-      const url = new URL(homepageHref);
+      const url = new URL(customHref);
       const urlPort = parseInt(
         url.port || (url.protocol === 'https:' ? '443' : '80')
       );
 
       if (urlPort === port) {
-        return homepageHref;
+        return customHref;
       }
     } catch (e) {
       // Invalid URL, fall through to default
@@ -127,8 +128,11 @@ export function processContainer(
     container.labels?.['com.docker.compose.project'] || 'standalone';
 
   // Extract homepage metadata
-  const displayName = container.labels?.['homepage.name'] || container.name;
-  const customUrl = container.labels?.['homepage.href'];
+  const displayName = container.labels?.['dockhand-tavern.name'] || 
+                      container.labels?.['homepage.name'] || 
+                      container.name;
+  const customUrl = container.labels?.['dockhand-tavern.href'] || 
+                    container.labels?.['homepage.href'];
   const icon = container.labels?.['homepage.icon'];
 
   // Build port URLs

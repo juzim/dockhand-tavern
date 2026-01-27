@@ -1,6 +1,6 @@
 /**
  * Client-side JavaScript for Dockhand Dashboard
- * Handles filter interactions and page refresh
+ * Handles filter interactions with client-side filtering
  */
 
 (function () {
@@ -14,28 +14,153 @@
   const resetBtn = document.getElementById('reset-filters');
 
   /**
-   * Build URL with filter query parameters
+   * Update URL search params without reloading page
    */
-  function buildFilterUrl() {
+  function updateUrlWithoutReload(filters) {
     const params = new URLSearchParams();
-
-    const search = searchInput.value.trim();
-    const stack = stackFilter.value;
-    const env = envFilter.value;
-
-    if (search) params.set('search', search);
-    if (stack) params.set('stack', stack);
-    if (env) params.set('env', env);
-
-    const queryString = params.toString();
-    return queryString ? `/?${queryString}` : '/';
+    if (filters.search) params.set('search', filters.search);
+    if (filters.stack) params.set('stack', filters.stack);
+    if (filters.env) params.set('env', filters.env);
+    
+    const newUrl = params.toString() ? `/?${params.toString()}` : '/';
+    window.history.pushState({}, '', newUrl);
   }
 
   /**
-   * Apply filters by navigating to filtered URL
+   * Update badge active states based on current filters
    */
-  function applyFilters() {
-    window.location.href = buildFilterUrl();
+  function updateBadgeStates() {
+    const currentStack = stackFilter ? stackFilter.value : '';
+    const currentEnv = envFilter ? envFilter.value : '';
+    
+    // Update all stack badges
+    document.querySelectorAll('.badge-stack').forEach(badge => {
+      const badgeValue = badge.dataset.filterValue;
+      if (badgeValue === currentStack) {
+        badge.classList.add('badge-active');
+      } else {
+        badge.classList.remove('badge-active');
+      }
+    });
+    
+    // Update all env badges
+    document.querySelectorAll('.badge-env').forEach(badge => {
+      const badgeValue = badge.dataset.filterValue;
+      if (badgeValue === currentEnv) {
+        badge.classList.add('badge-active');
+      } else {
+        badge.classList.remove('badge-active');
+      }
+    });
+  }
+
+  /**
+   * Apply filters by toggling card visibility (client-side)
+   */
+  function applyFiltersClientSide() {
+    const search = searchInput ? searchInput.value.trim().toLowerCase() : '';
+    const stack = stackFilter ? stackFilter.value : '';
+    const env = envFilter ? envFilter.value : '';
+    
+    const cards = document.querySelectorAll('.card');
+    const emptyState = document.querySelector('.empty-state');
+    let visibleCount = 0;
+    
+    cards.forEach(card => {
+      const cardStack = card.dataset.stack;
+      const cardEnv = card.dataset.env;
+      const cardNameElement = card.querySelector('.container-name');
+      const cardName = cardNameElement ? cardNameElement.textContent.toLowerCase() : '';
+      
+      // Determine if card should be visible
+      let shouldShow = true;
+      
+      if (search && !cardName.includes(search)) {
+        shouldShow = false;
+      }
+      
+      if (stack && cardStack !== stack) {
+        shouldShow = false;
+      }
+      
+      if (env && cardEnv !== env) {
+        shouldShow = false;
+      }
+      
+      // Toggle visibility class
+      if (shouldShow) {
+        card.classList.remove('card-hidden');
+        visibleCount++;
+      } else {
+        card.classList.add('card-hidden');
+      }
+    });
+    
+    // Show/hide empty state
+    if (emptyState) {
+      emptyState.style.display = visibleCount === 0 ? 'block' : 'none';
+    }
+    
+    // Update URL without reload
+    updateUrlWithoutReload({ search, stack, env });
+    
+    // Update badge states
+    updateBadgeStates();
+    
+    // Update reset button state
+    updateResetButtonState();
+  }
+
+  /**
+   * Update stack dropdown based on selected environment
+   */
+  function updateStackDropdown() {
+    if (!stackFilter) return;
+    
+    const selectedEnv = envFilter ? envFilter.value : '';
+    const cards = document.querySelectorAll('.card');
+    const availableStacks = new Set();
+    
+    // Find all stacks in selected environment
+    cards.forEach(card => {
+      if (!selectedEnv || card.dataset.env === selectedEnv) {
+        availableStacks.add(card.dataset.stack);
+      }
+    });
+    
+    // Rebuild stack dropdown
+    const currentStack = stackFilter.value;
+    stackFilter.innerHTML = '<option value="">All Stacks</option>';
+    
+    Array.from(availableStacks).sort().forEach(stack => {
+      const option = document.createElement('option');
+      option.value = stack;
+      option.textContent = stack;
+      if (stack === currentStack) option.selected = true;
+      stackFilter.appendChild(option);
+    });
+  }
+
+  /**
+   * Apply filters on page load from URL params
+   */
+  function applyInitialFilters() {
+    const urlParams = new URLSearchParams(window.location.search);
+    
+    // Set filter values from URL
+    if (searchInput) searchInput.value = urlParams.get('search') || '';
+    if (stackFilter) stackFilter.value = urlParams.get('stack') || '';
+    if (envFilter) envFilter.value = urlParams.get('env') || '';
+    
+    // Update stack dropdown based on env
+    updateStackDropdown();
+    
+    // Apply filters if any exist
+    if (urlParams.toString()) {
+      // Remove has-filters class to show cards
+      document.body.classList.remove('has-filters');
+      applyFiltersClientSide();
+    }
   }
 
   /**
@@ -55,28 +180,31 @@
 
   // Event listeners
   if (searchInput) {
-    // Debounce search input to avoid too many requests
+    // Debounce search input to avoid too many updates
     searchInput.addEventListener(
       'input',
       debounce(() => {
-        applyFilters();
+        applyFiltersClientSide();
       }, 500)
     );
 
     // Also trigger on Enter key
     searchInput.addEventListener('keypress', (e) => {
       if (e.key === 'Enter') {
-        applyFilters();
+        applyFiltersClientSide();
       }
     });
   }
 
   if (stackFilter) {
-    stackFilter.addEventListener('change', applyFilters);
+    stackFilter.addEventListener('change', applyFiltersClientSide);
   }
 
   if (envFilter) {
-    envFilter.addEventListener('change', applyFilters);
+    envFilter.addEventListener('change', () => {
+      updateStackDropdown();
+      applyFiltersClientSide();
+    });
   }
 
   if (refreshBtn) {
@@ -91,8 +219,16 @@
 
   if (resetBtn) {
     resetBtn.addEventListener('click', () => {
-      // Navigate to home without any filters
-      window.location.href = '/';
+      // Clear all filter inputs
+      if (searchInput) searchInput.value = '';
+      if (stackFilter) stackFilter.value = '';
+      if (envFilter) envFilter.value = '';
+      
+      // Reset stack dropdown
+      updateStackDropdown();
+      
+      // Apply filters (will show all)
+      applyFiltersClientSide();
     });
   }
 
@@ -110,8 +246,44 @@
     resetBtn.disabled = !hasActiveFilters;
   }
 
-  // Initialize reset button state on page load
-  updateResetButtonState();
+  /**
+   * Handle badge clicks for toggling filters
+   */
+  function initBadgeFilters() {
+    const badges = document.querySelectorAll('.badge[data-filter-type]');
+    
+    badges.forEach(badge => {
+      badge.addEventListener('click', (e) => {
+        e.preventDefault();
+        
+        const filterType = badge.dataset.filterType;
+        const filterValue = badge.dataset.filterValue;
+        const isActive = badge.classList.contains('badge-active');
+        
+        if (isActive) {
+          // Remove this filter
+          if (filterType === 'stack' && stackFilter) {
+            stackFilter.value = '';
+          } else if (filterType === 'env' && envFilter) {
+            envFilter.value = '';
+          }
+        } else {
+          // Apply this filter
+          if (filterType === 'stack' && stackFilter) {
+            stackFilter.value = filterValue;
+          } else if (filterType === 'env' && envFilter) {
+            envFilter.value = filterValue;
+            updateStackDropdown();
+          }
+        }
+        
+        applyFiltersClientSide();
+      });
+    });
+  }
+
+  // Initialize badge filters
+  initBadgeFilters();
 
   // Keyboard shortcuts
   document.addEventListener('keydown', (e) => {
@@ -133,9 +305,11 @@
     }
   });
 
-  // Auto-focus search on page load (optional)
-  // Uncomment if you want search auto-focused
-  // if (searchInput && !searchInput.value) {
-  //   searchInput.focus();
-  // }
+  // Handle browser back/forward buttons
+  window.addEventListener('popstate', () => {
+    applyInitialFilters();
+  });
+
+  // Apply initial filters on page load
+  applyInitialFilters();
 })();

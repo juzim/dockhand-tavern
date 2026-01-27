@@ -68,7 +68,7 @@ export function buildPortUrl(
 /**
  * Resolve icon URL from selfh.st CDN
  * Priority: homepage.icon label > stack name > generic fallback
- * Uses -dark variant by default for Catppuccin Mocha theme
+ * Uses base icons (no theme suffix) for maximum compatibility
  */
 export function resolveIconUrl(
   homepageIcon: string | undefined,
@@ -82,8 +82,8 @@ export function resolveIconUrl(
       return homepageIcon;
     }
     
-    // Use homepage.icon label as-is (user can specify theme like "plex-light")
-    iconName = homepageIcon;
+    // Use homepage.icon label (strip .png extension if present)
+    iconName = homepageIcon.replace(/\.png$/i, '');
   } else {
     // Fall back to stack name
     iconName = stackName === 'standalone' ? 'docker' : stackName;
@@ -95,9 +95,8 @@ export function resolveIconUrl(
     .replace(/[_\s]+/g, '-')
     .replace(/[^a-z0-9-]/g, '');
 
-  // If icon name doesn't already have a theme suffix, append -dark
-  const hasThemeSuffix = sanitized.endsWith('-light') || sanitized.endsWith('-dark');
-  const finalIconName = hasThemeSuffix ? sanitized : `${sanitized}-dark`;
+  // Use base icon name (no theme suffix by default)
+  const finalIconName = sanitized;
 
   // Build CDN URL
   return `https://cdn.jsdelivr.net/gh/selfhst/icons/png/${finalIconName}.png`;

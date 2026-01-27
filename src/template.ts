@@ -4,13 +4,15 @@
  */
 
 import type { CacheData, ProcessedContainer, FilterOptions } from './types';
-import { filterContainers, getFilteredStacks, getUniqueEnvironments } from './utils';
+import { getUniqueStacks, getUniqueEnvironments } from './utils';
 
 /**
  * Render a single container card
  */
 function renderCard(container: ProcessedContainer): string {
-  const genericIconUrl = 'https://cdn.jsdelivr.net/gh/selfhst/icons/png/docker-dark.png';
+  const genericIconUrl = 'https://cdn.jsdelivr.net/gh/selfhst/icons/png/docker.png';
+  const hasSinglePort = container.ports.length === 1;
+  const primaryUrl = hasSinglePort ? container.ports[0].url : '#';
   
   return `
     <div class="card" data-stack="${container.stack}" data-env="${container.environment.name}">
@@ -21,21 +23,41 @@ function renderCard(container: ProcessedContainer): string {
           class="card-icon"
           onerror="this.onerror=null; this.src='${genericIconUrl}';"
         />
-        <h3 class="container-name">${escapeHtml(container.displayName)}</h3>
+        ${hasSinglePort 
+          ? `<h3 class="container-name">
+               <a href="${escapeHtml(primaryUrl)}" target="_blank" class="container-link">
+                 ${escapeHtml(container.displayName)}
+               </a>
+             </h3>`
+          : `<h3 class="container-name">${escapeHtml(container.displayName)}</h3>`
+        }
       </div>
       
-      <div class="ports">
-        ${container.ports
-          .map(
-            ({ port, url }) =>
-              `<a href="${escapeHtml(url)}" target="_blank" class="port-badge" title="Open ${url}">${port}</a>`
-          )
-          .join('')}
-      </div>
+      ${!hasSinglePort ? `
+        <div class="ports-list">
+          ${container.ports
+            .map(({ port, url }) => 
+              `<a href="${escapeHtml(url)}" target="_blank" class="port-link">${port}</a>`
+            )
+            .join('<span class="port-separator">•</span>')}
+        </div>
+      ` : ''}
       
       <div class="card-labels">
-        <span class="badge badge-stack">${escapeHtml(container.stack)}</span>
-        <span class="badge badge-env">${escapeHtml(container.environment.name)}</span>
+        <a href="/?stack=${encodeURIComponent(container.stack)}" 
+           class="badge badge-stack" 
+           data-filter-type="stack"
+           data-filter-value="${escapeHtml(container.stack)}"
+           title="Click to toggle filter: ${escapeHtml(container.stack)}">
+          ${escapeHtml(container.stack)}
+        </a>
+        <a href="/?env=${encodeURIComponent(container.environment.name)}" 
+           class="badge badge-env"
+           data-filter-type="env"
+           data-filter-value="${escapeHtml(container.environment.name)}"
+           title="Click to toggle filter: ${escapeHtml(container.environment.name)}">
+          ${escapeHtml(container.environment.name)}
+        </a>
       </div>
     </div>
   `;
@@ -48,9 +70,9 @@ export function renderDashboard(
   data: CacheData,
   filters: FilterOptions = {}
 ): string {
-  const filtered = filterContainers(data.containers, filters);
-  const stacks = getFilteredStacks(data.containers, filters.env);
-  const environments = getUniqueEnvironments(data.containers);
+  const allContainers = data.containers;
+  const stacks = getUniqueStacks(allContainers);
+  const environments = getUniqueEnvironments(allContainers);
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -60,10 +82,21 @@ export function renderDashboard(
   <title>Dockhand Dashboard</title>
   <link rel="stylesheet" href="/style.css">
   <meta name="description" content="Fast dashboard for Dockhand container management">
+  <style>
+    /* Hide cards on initial load if filters present (prevent flash) */
+    body.has-filters .card { 
+      opacity: 0; 
+      max-height: 0;
+      overflow: hidden;
+    }
+  </style>
 </head>
 <body>
   <header>
-    <h1>🐳 Dockhand Dashboard</h1>
+    <div class="header-top">
+      <h1>🐳 Dockhand Dashboard</h1>
+      <button id="refresh" title="Refresh">↻</button>
+    </div>
     
     <div class="filters">
       <input 
@@ -93,7 +126,6 @@ export function renderDashboard(
           .join('')}
       </select>
       
-      <button id="refresh" title="Refresh page">↻ Refresh</button>
       <button id="reset-filters" title="Clear all filters">✕ Clear</button>
     </div>
     
@@ -105,15 +137,25 @@ export function renderDashboard(
     
     <p class="last-update">
       Last updated: ${data.lastUpdate.toLocaleString()} 
-      <span class="container-count">(${filtered.length} container${filtered.length !== 1 ? 's' : ''})</span>
+      <span class="container-count">(${allContainers.length} container${allContainers.length !== 1 ? 's' : ''})</span>
     </p>
   </header>
   
   <main class="container-grid">
-    ${filtered.length > 0 ? filtered.map((c) => renderCard(c)).join('') : '<div class="empty-state"><p>No containers found</p><p class="empty-hint">Try adjusting your filters or start some containers in Dockhand</p></div>'}
+    ${allContainers.map((c) => renderCard(c)).join('')}
+    <div class="empty-state" style="display: none;">
+      <p>No containers found</p>
+      <p class="empty-hint">Try adjusting your filters or start some containers in Dockhand</p>
+    </div>
   </main>
   
   <script src="/app.js"></script>
+  <script>
+    // Add class if URL has filters (prevents flash of all cards)
+    if (window.location.search) {
+      document.body.classList.add('has-filters');
+    }
+  </script>
 </body>
 </html>`;
 }

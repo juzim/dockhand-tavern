@@ -1,5 +1,5 @@
 /**
- * Dockhand Dashboard - Main Server
+ * Dockhand Tavern - Main Server
  * Built with Bun + Elysia
  */
 
@@ -20,7 +20,7 @@ if (!DOCKHAND_PASSWORD) {
   process.exit(1);
 }
 
-console.log('🚀 Starting Dockhand Dashboard...');
+console.log('🍺 Starting Dockhand Tavern...');
 console.log(`   Dockhand URL: ${DOCKHAND_URL}`);
 console.log(`   Username: ${DOCKHAND_USERNAME}`);
 console.log(`   Port: ${PORT}`);
@@ -114,7 +114,7 @@ const app = new Elysia()
   // Start server
   .listen(PORT);
 
-console.log(`\n✅ Dockhand Dashboard is running!`);
+console.log(`\n✅ Dockhand Tavern is running!`);
 console.log(`   Dashboard: http://localhost:${PORT}`);
 console.log(`   Health: http://localhost:${PORT}/health`);
 console.log(`   Webhook: http://localhost:${PORT}/webhook (POST)`);

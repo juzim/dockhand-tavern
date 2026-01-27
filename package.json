@@ -1,7 +1,7 @@
 {
-  "name": "dockhand-dash",
+  "name": "dockhand-tavern",
   "version": "1.0.0",
-  "description": "Fast Homer/Heimdall-style dashboard for Dockhand",
+  "description": "Fast dashboard for Dockhand container management",
   "type": "module",
   "scripts": {
     "dev": "bun --watch src/server.ts",

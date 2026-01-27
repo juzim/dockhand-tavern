@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+bun.lockb
+
+# Environment
+.env
+.env.local
+
+# Documentation
+*.md
+!README.md
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+
+# Test files
+test-*.py
+test-*.js
+run-test.sh
+
+# Misc
+.DS_Store
+*.log

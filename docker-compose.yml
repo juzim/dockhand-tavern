@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  dockhand-dash:
+    build: .
+    container_name: dockhand-dash
+    ports:
+      - "3001:3001"
+    environment:
+      - DOCKHAND_URL=${DOCKHAND_URL:-http://192.168.178.156:3000}
+      - DOCKHAND_USERNAME=${DOCKHAND_USERNAME:-admin}
+      - DOCKHAND_PASSWORD=${DOCKHAND_PASSWORD}
+      - PORT=3001
+    restart: unless-stopped
+    networks:
+      - dockhand-net
+
+networks:
+  dockhand-net:
+    driver: bridge

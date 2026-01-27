@@ -1,0 +1,17 @@
+{
+  "name": "dockhand-dash",
+  "version": "1.0.0",
+  "description": "Fast Homer/Heimdall-style dashboard for Dockhand",
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/server.ts",
+    "start": "bun src/server.ts",
+    "build": "echo 'No build step needed for Bun'"
+  },
+  "dependencies": {
+    "elysia": "^1.0.0"
+  },
+  "devDependencies": {
+    "bun-types": "latest"
+  }
+}

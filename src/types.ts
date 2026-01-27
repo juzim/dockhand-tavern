@@ -1,0 +1,71 @@
+/**
+ * TypeScript type definitions for Dockhand Dashboard
+ */
+
+// Dockhand API Response Types
+export interface DockhandEnvironment {
+  id: number;
+  name: string;
+  type: string;
+  publicIp: string;
+}
+
+export interface DockhandPort {
+  IP: string;           // "0.0.0.0" or "::"
+  PrivatePort: number;  // Container internal port
+  PublicPort: number;   // Host exposed port
+  Type: string;         // "tcp" | "udp"
+}
+
+export interface DockhandContainer {
+  id: string;
+  name: string;
+  image: string;
+  state: string;
+  status: string;
+  created: number;
+  ports: DockhandPort[];
+  networks: Record<string, { ipAddress: string }>;
+  health?: string;
+  restartCount: number;
+  mounts: any[];
+  labels: Record<string, string>;
+  command: string;
+  systemContainer: any;
+}
+
+// Processed Data for Display
+export interface ProcessedContainer {
+  id: string;
+  name: string;
+  displayName: string;
+  stack: string;
+  environment: {
+    id: number;
+    name: string;
+    publicIp: string;
+  };
+  ports: {
+    port: number;
+    url: string;
+  }[];
+  customUrl?: string;
+  icon?: string;
+  iconUrl: string;
+  image: string;
+}
+
+// Cache Structure
+export interface CacheData {
+  environments: DockhandEnvironment[];
+  containers: ProcessedContainer[];
+  lastUpdate: Date;
+  error?: string;
+}
+
+// Filter Options
+export interface FilterOptions {
+  search?: string;
+  stack?: string;
+  env?: string;
+}

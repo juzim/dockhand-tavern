@@ -31,7 +31,7 @@ docker run -d \
   -e DOCKHAND_URL=http://your-dockhand:3000 \
   -e DOCKHAND_USERNAME=admin \
   -e DOCKHAND_PASSWORD=your-password \
-  ghcr.io/YOUR_USERNAME/dockhand-tavern:latest
+  ghcr.io/juzim/dockhand-tavern:latest
 ```
 
 Open your browser at `http://localhost:3001`
@@ -114,7 +114,7 @@ services:
 version: '3.8'
 services:
   dockhand-tavern:
-    image: ghcr.io/YOUR_USERNAME/dockhand-tavern:latest
+    image: ghcr.io/juzim/dockhand-tavern:latest
     container_name: dockhand-tavern
     ports:
       - "3001:3001"

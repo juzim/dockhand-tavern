@@ -4,26 +4,61 @@
  */
 
 import type { CacheData, ProcessedContainer, FilterOptions } from './types';
-import { getUniqueStacks, getUniqueEnvironments } from './utils';
+import { getUniqueGroups, getUniqueEnvironments } from './utils';
+
+/**
+ * Render containers grouped by their group field
+ * Groups are created dynamically based on actual data
+ * Groups sorted alphabetically, "ungrouped" last
+ * Containers within groups sorted by displayName
+ */
+function renderGroupedContainers(containers: ProcessedContainer[]): string {
+  // Group containers by their group field
+  const grouped = new Map<string, ProcessedContainer[]>();
+  
+  containers.forEach(container => {
+    const group = container.group;
+    if (!grouped.has(group)) {
+      grouped.set(group, []);
+    }
+    grouped.get(group)!.push(container);
+  });
+  
+  // Sort groups alphabetically, "ungrouped" last
+  const sortedGroups = Array.from(grouped.keys()).sort((a, b) => {
+    if (a === 'ungrouped') return 1;
+    if (b === 'ungrouped') return -1;
+    return a.localeCompare(b);
+  });
+  
+  // Render each group section
+  return sortedGroups.map(groupName => {
+    const groupContainers = grouped.get(groupName)!;
+    
+    // Sort containers within group by displayName
+    const sortedContainers = groupContainers.sort((a, b) => 
+      a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' })
+    );
+    
+    return `
+      <div class="container-group" data-group-name="${escapeHtml(groupName)}">
+        <h2 class="group-header">${escapeHtml(groupName)}</h2>
+        <div class="container-grid">
+          ${sortedContainers.map(c => renderCard(c)).join('')}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
 
 /**
  * Render a single container card
  */
 function renderCard(container: ProcessedContainer): string {
   const genericIconUrl = 'https://cdn.jsdelivr.net/gh/selfhst/icons/png/docker.png';
-  const hasSinglePort = container.ports.length === 1;
-  const primaryUrl = hasSinglePort ? (container.customUrl || container.ports[0].url) : '#';
   
   return `
-    <div class="card" data-stack="${container.stack}" data-env="${container.environment.name}">
-      <a href="/?stack=${encodeURIComponent(container.stack)}"
-         class="stack-label"
-         data-filter-type="stack"
-         data-filter-value="${escapeHtml(container.stack)}"
-         title="Filter by: ${escapeHtml(container.stack)}">
-        ${escapeHtml(container.stack)}
-      </a>
-      
+    <div class="card" data-group="${container.group}" data-env="${container.environment.name}">
       <a href="/?env=${encodeURIComponent(container.environment.name)}" 
          class="ribbon ribbon-env"
          data-filter-type="env"
@@ -40,25 +75,12 @@ function renderCard(container: ProcessedContainer): string {
           class="card-icon"
           onerror="this.onerror=null; this.src='${genericIconUrl}';"
         />
-        ${hasSinglePort 
-          ? `<h3 class="container-name">
-               <a href="${escapeHtml(primaryUrl)}" target="_blank" class="container-link">
-                 ${escapeHtml(container.displayName)}
-               </a>
-             </h3>`
-          : `<h3 class="container-name">${escapeHtml(container.displayName)}</h3>`
-        }
+        <h3 class="container-name">
+          <a href="${escapeHtml(container.url)}" target="_blank" class="container-link">
+            ${escapeHtml(container.displayName)}
+          </a>
+        </h3>
       </div>
-      
-      ${!hasSinglePort ? `
-        <div class="ports-list">
-          ${container.ports
-            .map(({ port, url }) => 
-              `<a href="${escapeHtml(url)}" target="_blank" class="port-link">${port}</a>`
-            )
-            .join('<span class="port-separator">•</span>')}
-        </div>
-      ` : ''}
     </div>
   `;
 }
@@ -70,11 +92,7 @@ export function renderDashboard(
   data: CacheData,
   filters: FilterOptions = {}
 ): string {
-  // Sort containers by display name
-  const allContainers = [...data.containers].sort((a, b) => 
-    a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' })
-  );
-  const stacks = getUniqueStacks(allContainers);
+  const allContainers = [...data.containers];
   const environments = getUniqueEnvironments(allContainers);
 
   return `<!DOCTYPE html>
@@ -109,16 +127,6 @@ export function renderDashboard(
         value="${escapeHtml(filters.search || '')}"
       />
       
-      <select id="stack-filter">
-        <option value="">All Stacks</option>
-        ${stacks
-          .map(
-            (stack) =>
-              `<option value="${escapeHtml(stack)}" ${filters.stack === stack ? 'selected' : ''}>${escapeHtml(stack)}</option>`
-          )
-          .join('')}
-      </select>
-      
       <select id="env-filter">
         <option value="">All Environments</option>
         ${environments
@@ -144,8 +152,8 @@ export function renderDashboard(
     </p>
   </header>
   
-  <main class="container-grid">
-    ${allContainers.map((c) => renderCard(c)).join('')}
+  <main>
+    ${renderGroupedContainers(allContainers)}
     <div class="empty-state" style="display: none;">
       <p>No containers found</p>
       <p class="empty-hint">Try adjusting your filters or start some containers in Dockhand</p>

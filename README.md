@@ -85,6 +85,10 @@ services:
 - **Frontend:** Server-side rendered HTML with client-side filtering
 - **Styling:** Catppuccin Mocha theme
 
+
+## Todo
+- [ ] Add external links
+
 ## License
 
 MIT

@@ -8,7 +8,6 @@
 
   // Get filter elements
   const searchInput = document.getElementById('search');
-  const stackFilter = document.getElementById('stack-filter');
   const envFilter = document.getElementById('env-filter');
   const refreshBtn = document.getElementById('refresh');
   const resetBtn = document.getElementById('reset-filters');
@@ -49,7 +48,6 @@
   function updateUrlWithoutReload(filters) {
     const params = new URLSearchParams();
     if (filters.search) params.set('search', filters.search);
-    if (filters.stack) params.set('stack', filters.stack);
     if (filters.env) params.set('env', filters.env);
     
     const newUrl = params.toString() ? `/?${params.toString()}` : '/';
@@ -60,18 +58,7 @@
    * Update badge active states based on current filters
    */
   function updateBadgeStates() {
-    const currentStack = stackFilter ? stackFilter.value : '';
     const currentEnv = envFilter ? envFilter.value : '';
-    
-    // Update all stack labels
-    document.querySelectorAll('.stack-label').forEach(label => {
-      const labelValue = label.dataset.filterValue;
-      if (labelValue === currentStack) {
-        label.classList.add('badge-active');
-      } else {
-        label.classList.remove('badge-active');
-      }
-    });
     
     // Update all env ribbons
     document.querySelectorAll('.ribbon-env').forEach(ribbon => {
@@ -89,7 +76,6 @@
    */
   function applyFiltersClientSide() {
     const search = searchInput ? searchInput.value.trim().toLowerCase() : '';
-    const stack = stackFilter ? stackFilter.value : '';
     const env = envFilter ? envFilter.value : '';
     
     const cards = document.querySelectorAll('.card');
@@ -97,7 +83,6 @@
     let visibleCount = 0;
     
     cards.forEach(card => {
-      const cardStack = card.dataset.stack;
       const cardEnv = card.dataset.env;
       const cardNameElement = card.querySelector('.container-name');
       const cardName = cardNameElement ? cardNameElement.textContent.toLowerCase() : '';
@@ -106,10 +91,6 @@
       let shouldShow = true;
       
       if (search && !cardName.includes(search)) {
-        shouldShow = false;
-      }
-      
-      if (stack && cardStack !== stack) {
         shouldShow = false;
       }
       
@@ -126,49 +107,25 @@
       }
     });
     
+    // Show/hide group sections based on visible cards
+    document.querySelectorAll('.container-group').forEach(group => {
+      const visibleCards = group.querySelectorAll('.card:not(.card-hidden)');
+      group.style.display = visibleCards.length > 0 ? 'block' : 'none';
+    });
+    
     // Show/hide empty state
     if (emptyState) {
       emptyState.style.display = visibleCount === 0 ? 'block' : 'none';
     }
     
     // Update URL without reload
-    updateUrlWithoutReload({ search, stack, env });
+    updateUrlWithoutReload({ search, env });
     
     // Update badge states
     updateBadgeStates();
     
     // Update reset button state
     updateResetButtonState();
-  }
-
-  /**
-   * Update stack dropdown based on selected environment
-   */
-  function updateStackDropdown() {
-    if (!stackFilter) return;
-    
-    const selectedEnv = envFilter ? envFilter.value : '';
-    const cards = document.querySelectorAll('.card');
-    const availableStacks = new Set();
-    
-    // Find all stacks in selected environment
-    cards.forEach(card => {
-      if (!selectedEnv || card.dataset.env === selectedEnv) {
-        availableStacks.add(card.dataset.stack);
-      }
-    });
-    
-    // Rebuild stack dropdown
-    const currentStack = stackFilter.value;
-    stackFilter.innerHTML = '<option value="">All Stacks</option>';
-    
-    Array.from(availableStacks).sort().forEach(stack => {
-      const option = document.createElement('option');
-      option.value = stack;
-      option.textContent = stack;
-      if (stack === currentStack) option.selected = true;
-      stackFilter.appendChild(option);
-    });
   }
 
   /**
@@ -179,11 +136,7 @@
     
     // Set filter values from URL
     if (searchInput) searchInput.value = urlParams.get('search') || '';
-    if (stackFilter) stackFilter.value = urlParams.get('stack') || '';
     if (envFilter) envFilter.value = urlParams.get('env') || '';
-    
-    // Update stack dropdown based on env
-    updateStackDropdown();
     
     // Apply filters if any exist
     if (urlParams.toString()) {
@@ -226,13 +179,8 @@
     });
   }
 
-  if (stackFilter) {
-    stackFilter.addEventListener('change', applyFiltersClientSide);
-  }
-
   if (envFilter) {
     envFilter.addEventListener('change', () => {
-      updateStackDropdown();
       applyFiltersClientSide();
     });
   }
@@ -251,11 +199,7 @@
     resetBtn.addEventListener('click', () => {
       // Clear all filter inputs
       if (searchInput) searchInput.value = '';
-      if (stackFilter) stackFilter.value = '';
       if (envFilter) envFilter.value = '';
-      
-      // Reset stack dropdown
-      updateStackDropdown();
       
       // Apply filters (will show all)
       applyFiltersClientSide();
@@ -270,18 +214,17 @@
 
     const hasActiveFilters =
       (searchInput && searchInput.value.trim()) ||
-      (stackFilter && stackFilter.value) ||
       (envFilter && envFilter.value);
 
     resetBtn.disabled = !hasActiveFilters;
   }
 
   /**
-   * Handle ribbon and label clicks for toggling filters
+   * Handle ribbon clicks for toggling filters
    */
   function initBadgeFilters() {
-    // Handle both ribbons and stack labels
-    const filterElements = document.querySelectorAll('.ribbon[data-filter-type], .stack-label[data-filter-type]');
+    // Handle only ribbons (not stack labels)
+    const filterElements = document.querySelectorAll('.ribbon[data-filter-type]');
     
     filterElements.forEach(element => {
       element.addEventListener('click', (e) => {
@@ -291,20 +234,13 @@
         const filterValue = element.dataset.filterValue;
         const isActive = element.classList.contains('badge-active');
         
-        if (isActive) {
-          // Remove this filter
-          if (filterType === 'stack' && stackFilter) {
-            stackFilter.value = '';
-          } else if (filterType === 'env' && envFilter) {
+        if (filterType === 'env' && envFilter) {
+          if (isActive) {
+            // Remove this filter
             envFilter.value = '';
-          }
-        } else {
-          // Apply this filter
-          if (filterType === 'stack' && stackFilter) {
-            stackFilter.value = filterValue;
-          } else if (filterType === 'env' && envFilter) {
+          } else {
+            // Apply this filter
             envFilter.value = filterValue;
-            updateStackDropdown();
           }
         }
         

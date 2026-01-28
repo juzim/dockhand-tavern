@@ -37,19 +37,14 @@ export interface DockhandContainer {
 // Processed Data for Display
 export interface ProcessedContainer {
   id: string;
-  name: string;
   displayName: string;
-  stack: string;
+  group: string;
   environment: {
     id: number;
     name: string;
     publicIp: string;
   };
-  ports: {
-    port: number;
-    url: string;
-  }[];
-  customUrl?: string;
+  url: string;
   icon?: string;
   iconUrl: string;
   image: string;
@@ -66,6 +61,5 @@ export interface CacheData {
 // Filter Options
 export interface FilterOptions {
   search?: string;
-  stack?: string;
   env?: string;
 }

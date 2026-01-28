@@ -4,7 +4,7 @@
  */
 
 import { DockhandClient } from './dockhand-client';
-import { processContainer } from './utils';
+import { processContainer, parseBookmarks } from './utils';
 import type { CacheData, ProcessedContainer } from './types';
 
 export class CacheManager {
@@ -14,6 +14,12 @@ export class CacheManager {
     lastUpdate: new Date(),
     error: undefined,
   };
+  private bookmarks: ProcessedContainer[];
+
+  constructor() {
+    // Parse bookmarks once on initialization
+    this.bookmarks = parseBookmarks();
+  }
 
   /**
    * Refresh cache from Dockhand API
@@ -65,10 +71,13 @@ export class CacheManager {
   }
 
   /**
-   * Get current cache data
+   * Get current cache data (merged with bookmarks)
    */
   get(): CacheData {
-    return this.data;
+    return {
+      ...this.data,
+      containers: [...this.data.containers, ...this.bookmarks],
+    };
   }
 
   /**
@@ -77,6 +86,7 @@ export class CacheManager {
   getStats() {
     return {
       totalContainers: this.data.containers.length,
+      totalBookmarks: this.bookmarks.length,
       totalEnvironments: this.data.environments.length,
       lastUpdate: this.data.lastUpdate,
       hasError: !!this.data.error,

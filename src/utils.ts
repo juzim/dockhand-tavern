@@ -34,60 +34,47 @@ export function extractPorts(ports: DockhandPort[]): number[] {
 }
 
 /**
- * Build access URL for a container port
- * Uses dockhand-tavern.href or homepage.href if available, otherwise constructs URL
+ * Build access URL for a container
+ * Uses dockhand-tavern.url label if available, otherwise constructs URL from first port
  */
-export function buildPortUrl(
+export function buildContainerUrl(
   container: DockhandContainer,
-  port: number,
+  firstPort: number,
   envPublicIp: string
 ): string {
-  // Check for custom URL (dockhand-tavern.href takes priority)
-  const customHref = container.labels?.['dockhand-tavern.href'] || 
-                     container.labels?.['homepage.href'];
+  // Check for custom URL
+  const customUrl = container.labels?.['dockhand-tavern.url'];
 
-  if (customHref) {
-    // Use custom href if it matches this port
-    try {
-      const url = new URL(customHref);
-      const urlPort = parseInt(
-        url.port || (url.protocol === 'https:' ? '443' : '80')
-      );
-
-      if (urlPort === port) {
-        return customHref;
-      }
-    } catch (e) {
-      // Invalid URL, fall through to default
-    }
+  if (customUrl) {
+    return customUrl;
   }
 
-  // Default: construct HTTP URL
-  return `http://${envPublicIp}:${port}`;
+  // Default: construct HTTP URL from first port
+  return `http://${envPublicIp}:${firstPort}`;
 }
 
 /**
  * Resolve icon URL from selfh.st CDN
- * Priority: homepage.icon label > stack name > generic fallback
+ * Priority: dockhand-tavern.icon label > fallback name > generic fallback
  * Uses base icons (no theme suffix) for maximum compatibility
  */
 export function resolveIconUrl(
-  homepageIcon: string | undefined,
-  stackName: string
+  iconLabel: string | undefined,
+  fallbackName: string
 ): string {
   let iconName: string;
 
-  if (homepageIcon) {
-    // If homepage.icon is a full URL, use it directly
-    if (homepageIcon.startsWith('http://') || homepageIcon.startsWith('https://')) {
-      return homepageIcon;
+  if (iconLabel) {
+    // If icon is a full URL, use it directly
+    if (iconLabel.startsWith('http://') || iconLabel.startsWith('https://')) {
+      return iconLabel;
     }
     
-    // Use homepage.icon label (strip .png extension if present)
-    iconName = homepageIcon.replace(/\.png$/i, '');
+    // Use icon label (strip .png extension if present)
+    iconName = iconLabel.replace(/\.png$/i, '');
   } else {
-    // Fall back to stack name
-    iconName = stackName === 'standalone' ? 'docker' : stackName;
+    // Fall back to display name
+    iconName = fallbackName === 'ungrouped' ? 'docker' : fallbackName;
   }
 
   // Sanitize icon name: lowercase, replace spaces/underscores with hyphens
@@ -123,39 +110,33 @@ export function processContainer(
     return null;
   }
 
-  // Extract stack name from compose labels
-  const stack =
-    container.labels?.['com.docker.compose.project'] || 'standalone';
+  // Extract group name - ONLY from dockhand-tavern.group label
+  const group = container.labels?.['dockhand-tavern.group'] || 'ungrouped';
 
-  // Extract homepage metadata
-  const displayName = container.labels?.['dockhand-tavern.name'] || 
-                      container.labels?.['homepage.name'] || 
-                      container.name;
-  const customUrl = container.labels?.['dockhand-tavern.href'] || 
-                    container.labels?.['homepage.href'];
-  const icon = container.labels?.['homepage.icon'];
+  // Extract metadata from dockhand-tavern labels
+  // Priority: custom name > compose service name > container name
+  const displayName = 
+    container.labels?.['dockhand-tavern.name'] || 
+    container.labels?.['com.docker.compose.service'] || 
+    container.name;
+  const icon = container.labels?.['dockhand-tavern.icon'];
 
-  // Build port URLs
-  const portUrls = ports.map((port) => ({
-    port,
-    url: buildPortUrl(container, port, environment.publicIp),
-  }));
+  // Build single URL from first port
+  const url = buildContainerUrl(container, ports[0], environment.publicIp);
 
   // Resolve icon URL
-  const iconUrl = resolveIconUrl(icon, stack);
+  const iconUrl = resolveIconUrl(icon, displayName);
 
   return {
     id: container.id,
-    name: container.name,
     displayName,
-    stack,
+    group,
     environment: {
       id: environment.id,
       name: environment.name,
       publicIp: environment.publicIp,
     },
-    ports: portUrls,
-    customUrl,
+    url,
     icon,
     iconUrl,
     image: container.image,
@@ -171,13 +152,11 @@ export function filterContainers(
 ): ProcessedContainer[] {
   let filtered = containers;
 
-  // Filter by search (container name or display name)
+  // Filter by search (display name)
   if (filters.search) {
     const searchLower = filters.search.toLowerCase();
     filtered = filtered.filter(
-      (c) =>
-        c.name.toLowerCase().includes(searchLower) ||
-        c.displayName.toLowerCase().includes(searchLower)
+      (c) => c.displayName.toLowerCase().includes(searchLower)
     );
   }
 
@@ -195,12 +174,17 @@ export function filterContainers(
 }
 
 /**
- * Get unique stack names from containers
+ * Get unique group names from containers
  */
-export function getUniqueStacks(containers: ProcessedContainer[]): string[] {
-  const stacks = new Set<string>();
-  containers.forEach((c) => stacks.add(c.stack));
-  return Array.from(stacks).sort();
+export function getUniqueGroups(containers: ProcessedContainer[]): string[] {
+  const groups = new Set<string>();
+  containers.forEach((c) => groups.add(c.group));
+  return Array.from(groups).sort((a, b) => {
+    // Sort alphabetically, but "ungrouped" always last
+    if (a === 'ungrouped') return 1;
+    if (b === 'ungrouped') return -1;
+    return a.localeCompare(b);
+  });
 }
 
 /**
@@ -214,21 +198,79 @@ export function getUniqueEnvironments(
   return Array.from(envs).sort();
 }
 
+
+
 /**
- * Get unique stacks filtered by environment selection
+ * Parse BOOKMARKS environment variable into ProcessedContainer objects
+ * Expected format: [{"name":"Foo","url":"https://example.com","icon":"optional","group":"optional"}]
  */
-export function getFilteredStacks(
-  containers: ProcessedContainer[],
-  selectedEnv?: string
-): string[] {
-  const stacks = new Set<string>();
+export function parseBookmarks(): ProcessedContainer[] {
+  const bookmarksEnv = process.env.BOOKMARKS;
   
-  containers.forEach((c) => {
-    // Only include stacks from the selected environment (or all if none selected)
-    if (!selectedEnv || c.environment.name === selectedEnv) {
-      stacks.add(c.stack);
+  if (!bookmarksEnv) {
+    return [];
+  }
+  
+  try {
+    const bookmarksArray = JSON.parse(bookmarksEnv);
+    
+    if (!Array.isArray(bookmarksArray)) {
+      console.warn('⚠️  BOOKMARKS must be a JSON array');
+      return [];
     }
-  });
+    
+    const processed: ProcessedContainer[] = [];
+    
+    for (const bookmark of bookmarksArray) {
+      if (!bookmark.name || !bookmark.url) {
+        console.warn('⚠️  Skipping invalid bookmark (missing name or url):', bookmark);
+        continue;
+      }
+      
+      try {
+        const processedBookmark = processBookmark(bookmark);
+        processed.push(processedBookmark);
+      } catch (error) {
+        console.warn('⚠️  Failed to process bookmark:', bookmark, error);
+      }
+    }
+    
+    if (processed.length > 0) {
+      console.log(`✅ Loaded ${processed.length} bookmark(s)`);
+    }
+    
+    return processed;
+    
+  } catch (error) {
+    console.error('❌ Failed to parse BOOKMARKS environment variable:', error);
+    return [];
+  }
+}
+
+/**
+ * Convert a bookmark entry into a ProcessedContainer
+ */
+export function processBookmark(entry: { 
+  name: string; 
+  url: string; 
+  icon?: string;
+  group?: string;
+}): ProcessedContainer {
+  // Generate a stable ID from the bookmark data
+  const id = `bookmark-${entry.name}-${entry.url}`;
   
-  return Array.from(stacks).sort();
+  return {
+    id,
+    displayName: entry.name,
+    group: entry.group || 'ungrouped',  // Use group or default to ungrouped
+    environment: {
+      id: -1,
+      name: 'bookmark',          // Shows as "bookmark" ribbon
+      publicIp: '',              // Not applicable
+    },
+    url: entry.url,              // Direct URL from user
+    icon: entry.icon,
+    iconUrl: resolveIconUrl(entry.icon, entry.name), // Use name for icon fallback
+    image: '',                   // Not applicable
+  };
 }

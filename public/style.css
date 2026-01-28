@@ -189,10 +189,33 @@ select option {
   font-weight: 600;
 }
 
-/* Container Grid */
-.container-grid {
+/* Main Container */
+main {
   max-width: 1400px;
   margin: 0 auto;
+}
+
+/* Container Groups */
+.container-group {
+  margin-bottom: 3rem;
+}
+
+.container-group:last-child {
+  margin-bottom: 0;
+}
+
+.group-header {
+  color: var(--ctp-mauve);
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: 1.5rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 2px solid var(--ctp-surface1);
+  text-transform: capitalize;
+}
+
+/* Container Grid */
+.container-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 1.5rem;
@@ -375,43 +398,6 @@ select option {
   gap: 0.875rem;
   padding-top: 1.25rem;
 }
-
-/* Stack Label (top-left corner, plain text) */
-.stack-label {
-  position: absolute;
-  top: 0.5rem;
-  left: 0.75rem;
-  font-size: 0.7rem;
-  font-weight: 500;
-  color: var(--ctp-subtext0);
-  text-decoration: none;
-  cursor: pointer;
-  transition: color 0.15s ease-out, opacity 0.15s ease-out;
-  z-index: 5;
-  text-transform: lowercase;
-  letter-spacing: 0.01em;
-  opacity: 0;
-}
-
-/* Show stack label on card hover */
-.card:hover .stack-label {
-  opacity: 1;
-}
-
-/* Show stack label when filter is active */
-.stack-label.badge-active {
-  opacity: 1;
-  color: var(--ctp-blue);
-  font-weight: 600;
-}
-
-/* Hover effect for stack label */
-.stack-label:hover {
-  color: var(--ctp-mauve);
-}
-
-
-
 
 
 /* Environment Ribbon Base (fallback) */

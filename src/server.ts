@@ -78,7 +78,7 @@ const app = new Elysia()
       env: query.env as string | undefined,
     };
 
-    const html = renderDashboard(cache.get(), filters);
+    const html = renderDashboard(cache.get(), filters, DOCKHAND_URL);
 
     return new Response(html, {
       headers: {

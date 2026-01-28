@@ -98,10 +98,10 @@ services:
     image: foo
     label:
         dockhand-tavern.name: "My App"
-        dockhand-tavern.href: "https://myapp.example.com"
+        dockhand-tavern.url: "https://myapp.example.com"
         dockhand-tavern.icon: "plex"
         dockhand-tavern.group: "Fun"
-        dockhand-tavern.disabled: false
+        dockhand-tavern.disable: false
        
 ```
 

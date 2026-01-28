@@ -90,7 +90,8 @@ function renderCard(container: ProcessedContainer): string {
  */
 export function renderDashboard(
   data: CacheData,
-  filters: FilterOptions = {}
+  filters: FilterOptions = {},
+  dockhandUrl?: string
 ): string {
   const allContainers = [...data.containers];
   const environments = getUniqueEnvironments(allContainers);
@@ -115,7 +116,10 @@ export function renderDashboard(
 <body>
   <header>
     <div class="header-top">
-      <h1>🍺 Dockhand Tavern</h1>
+      <div class="title-group">
+        <h1>🍺 Dockhand Tavern</h1>
+        ${dockhandUrl ? `<a href="${escapeHtml(dockhandUrl)}" target="_blank" class="dockhand-link" title="Open Dockhand">${escapeHtml(new URL(dockhandUrl).host)}</a>` : ''}
+      </div>
       <button id="refresh" title="Refresh">↻</button>
     </div>
     

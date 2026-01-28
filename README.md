@@ -2,7 +2,7 @@
 
 Fast dashboard for accessing services deployed by [Dockhand](https://github.com/dockhand/dockhand).
 
-Pulls data for all containers and creates links for each service. When a state container changes, the date is refreshed.
+Pulls data for all containers and creates links for each service. When a state container changes, the data is refreshed.
 
 
 What it's not (you already have dockhand for this): 
@@ -19,9 +19,10 @@ Written with opencode and claude 4.5 Sonnet.
 ## Features
 
 - **Webhook updates** - Real-time data refresh when containers change
-- **Smart labels** - Custom display names and URLs via Docker labels
+- **Smart labels** - Custom display names, URLs and groups via Docker labels
 - **Icon support** - Automatic icons from [selfh.st/icons](https://selfh.st/icons)
 - **Bookmarks** - Services can be added manually
+- **Filters** - Services can be searched and filtered by dockhand environment
 - **nginx-proxy-manager support** - (optional) Matches IPs against proxy hosts to show domain instead if IPs
 
 ## Quick Start
@@ -134,8 +135,6 @@ services:
 ```
 
 ### Webhooks
-
-Configure Dockhand to send webhooks to `http://dockhand-tavern:3001/webhook` for automatic dashboard updates when containers change.
 
 In dockhand, create a new apprise notification for `json://YOUR-TAVERN-IP:PORT/webhook` and activiate the triggers in the environment config. 
 

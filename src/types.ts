@@ -2,6 +2,9 @@
  * TypeScript type definitions for Dockhand Dashboard
  */
 
+// Export NPM types
+export type { NpmProxyHost, NpmAuthResponse } from './npm-types';
+
 // Dockhand API Response Types
 export interface DockhandEnvironment {
   id: number;

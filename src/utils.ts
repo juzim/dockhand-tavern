@@ -8,6 +8,7 @@ import type {
   DockhandPort,
   ProcessedContainer,
   FilterOptions,
+  NpmProxyHost,
 } from './types';
 
 /**
@@ -34,22 +35,68 @@ export function extractPorts(ports: DockhandPort[]): number[] {
 }
 
 /**
+ * Find NPM proxy host that matches container IP:port
+ * Returns the proxy host domain URL if found, null otherwise
+ */
+export function findNpmProxyUrl(
+  envIp: string,
+  containerPort: number,
+  npmProxyHosts: NpmProxyHost[]
+): string | null {
+  // Find all enabled proxy hosts where forward_host:forward_port matches envIp:containerPort
+  const matches = npmProxyHosts.filter(
+    host => 
+      host.enabled === true &&
+      host.forward_host === envIp && 
+      host.forward_port === containerPort
+  );
+
+  if (matches.length === 0) {
+    return null;
+  }
+
+  // Use first match
+  const match = matches[0];
+
+  // Use first domain name
+  const domain = match.domain_names[0];
+  if (!domain) {
+    return null;
+  }
+
+  // Determine protocol based on ssl_forced flag OR certificate_id presence
+  // Use HTTPS if ssl_forced is true OR if certificate_id is set (not 0 or null)
+  const hasSSL = match.ssl_forced || (match.certificate_id && match.certificate_id !== 0);
+  const protocol = hasSSL ? 'https' : 'http';
+
+  return `${protocol}://${domain}`;
+}
+
+/**
  * Build access URL for a container
- * Uses dockhand-tavern.url label if available, otherwise constructs URL from first port
+ * Priority: 1) dockhand-tavern.url label, 2) NPM proxy host, 3) default http://IP:port
  */
 export function buildContainerUrl(
   container: DockhandContainer,
   firstPort: number,
-  envPublicIp: string
+  envPublicIp: string,
+  npmProxyHosts?: NpmProxyHost[]
 ): string {
-  // Check for custom URL
+  // 1. Check for custom URL label (highest priority)
   const customUrl = container.labels?.['dockhand-tavern.url'];
-
   if (customUrl) {
     return customUrl;
   }
 
-  // Default: construct HTTP URL from first port
+  // 2. Check NPM proxy hosts for match (if provided)
+  if (npmProxyHosts && npmProxyHosts.length > 0) {
+    const npmUrl = findNpmProxyUrl(envPublicIp, firstPort, npmProxyHosts);
+    if (npmUrl) {
+      return npmUrl;
+    }
+  }
+
+  // 3. Default: construct HTTP URL from first port
   return `http://${envPublicIp}:${firstPort}`;
 }
 
@@ -95,8 +142,15 @@ export function resolveIconUrl(
  */
 export function processContainer(
   container: DockhandContainer,
-  environment: DockhandEnvironment
+  environment: DockhandEnvironment,
+  npmProxyHosts?: NpmProxyHost[]
 ): ProcessedContainer | null {
+  // Check if container is disabled via label
+  const isDisabled = container.labels?.['dockhand-tavern.disable'];
+  if (isDisabled === 'true' || isDisabled === '1') {
+    return null;
+  }
+
   // Only show running containers
   if (container.state !== 'running') {
     return null;
@@ -122,7 +176,7 @@ export function processContainer(
   const icon = container.labels?.['dockhand-tavern.icon'];
 
   // Build single URL from first port
-  const url = buildContainerUrl(container, ports[0], environment.publicIp);
+  const url = buildContainerUrl(container, ports[0], environment.publicIp, npmProxyHosts);
 
   // Resolve icon URL
   const iconUrl = resolveIconUrl(icon, displayName);

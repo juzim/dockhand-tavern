@@ -5,6 +5,7 @@
 
 import { Elysia } from 'elysia';
 import { DockhandClient } from './dockhand-client';
+import { NpmClient } from './npm-client';
 import { CacheManager } from './cache';
 import { renderDashboard } from './template';
 
@@ -13,6 +14,11 @@ const DOCKHAND_URL = process.env.DOCKHAND_URL || 'http://192.168.178.156:3000';
 const DOCKHAND_USERNAME = process.env.DOCKHAND_USERNAME || 'admin';
 const DOCKHAND_PASSWORD = process.env.DOCKHAND_PASSWORD || '';
 const PORT = parseInt(process.env.PORT || '3001', 10);
+
+// NPM environment variables (optional)
+const NPM_URL = process.env.NPM_URL;
+const NPM_EMAIL = process.env.NPM_EMAIL;
+const NPM_PASSWORD = process.env.NPM_PASSWORD;
 
 // Validate configuration
 if (!DOCKHAND_PASSWORD) {
@@ -25,13 +31,37 @@ console.log(`   Dockhand URL: ${DOCKHAND_URL}`);
 console.log(`   Username: ${DOCKHAND_USERNAME}`);
 console.log(`   Port: ${PORT}`);
 
+// Initialize NPM client if credentials provided
+let npmClient: NpmClient | undefined;
+if (NPM_URL && NPM_EMAIL && NPM_PASSWORD) {
+  console.log(`   NPM URL: ${NPM_URL}`);
+  console.log(`   NPM Email: ${NPM_EMAIL}`);
+  npmClient = new NpmClient(NPM_URL, NPM_EMAIL, NPM_PASSWORD);
+  
+  // Test NPM connection
+  try {
+    const npmConnected = await npmClient.testConnection();
+    if (npmConnected) {
+      console.log('✅ NPM connection successful');
+    } else {
+      console.warn('⚠️  NPM connection failed - will continue without NPM integration');
+      npmClient = undefined;
+    }
+  } catch (error) {
+    console.warn('⚠️  NPM connection test failed:', error);
+    npmClient = undefined;
+  }
+} else {
+  console.log('   NPM integration: disabled (credentials not provided)');
+}
+
 // Initialize Dockhand client and cache
 const client = new DockhandClient(DOCKHAND_URL, DOCKHAND_USERNAME, DOCKHAND_PASSWORD);
-const cache = new CacheManager();
+const cache = new CacheManager(npmClient);
 
 // Initial cache population
 console.log('📦 Populating initial cache...');
-await cache.refresh(client);
+await cache.refreshImmediate(client);
 console.log('✅ Initial cache populated');
 
 // Create Elysia app
@@ -57,25 +87,29 @@ const app = new Elysia()
     });
   })
 
-  // Webhook endpoint (non-blocking)
+  // Webhook endpoint (non-blocking) - accepts both GET and POST
   .post('/webhook', async ({ body }) => {
-    console.log('📨 Webhook received:', body);
+    console.log('📨 Webhook received (POST):', body);
+
+    // Trigger debounced cache refresh (non-blocking)
+    cache.refresh(client).catch((error) => {
+      console.error('❌ Webhook cache refresh failed:', error);
+    });
 
     // Respond immediately
-    const response = { status: 'ok', message: 'Webhook received' };
+    return { status: 'ok', message: 'Webhook received, refresh queued' };
+  })
 
-    // Trigger background cache refresh (non-blocking)
-    setTimeout(async () => {
-      try {
-        console.log('🔄 Refreshing cache in background...');
-        await cache.refresh(client);
-        console.log('✅ Cache refresh completed via webhook');
-      } catch (error) {
-        console.error('❌ Webhook cache refresh failed:', error);
-      }
-    }, 0);
+  .get('/webhook', async () => {
+    console.log('📨 Webhook received (GET)');
 
-    return response;
+    // Trigger debounced cache refresh (non-blocking)
+    cache.refresh(client).catch((error) => {
+      console.error('❌ Webhook cache refresh failed:', error);
+    });
+
+    // Respond immediately
+    return { status: 'ok', message: 'Webhook received, refresh queued' };
   })
 
   // Health check endpoint
@@ -117,8 +151,8 @@ const app = new Elysia()
 console.log(`\n✅ Dockhand Tavern is running!`);
 console.log(`   Dashboard: http://localhost:${PORT}`);
 console.log(`   Health: http://localhost:${PORT}/health`);
-console.log(`   Webhook: http://localhost:${PORT}/webhook (POST)`);
+console.log(`   Webhook: http://localhost:${PORT}/webhook (GET or POST)`);
 console.log(`\n📊 Cache stats:`, cache.getStats());
 console.log(`\n💡 Tip: Set this as your browser's new tab page!`);
 console.log(`\n🔄 The dashboard will auto-update via webhooks from Dockhand.`);
-console.log(`   Configure webhook in Dockhand: POST http://<this-server>:${PORT}/webhook\n`);
+console.log(`   Configure webhook in Dockhand: http://<this-server>:${PORT}/webhook\n`);

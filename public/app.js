@@ -14,6 +14,7 @@
 
   /**
    * Generate consistent color for environment name using hash
+   * Uses a combination of multiple hash techniques for better distribution
    */
   function getEnvColor(envName) {
     const colors = [
@@ -21,12 +22,22 @@
       'red', 'teal', 'sky', 'pink'
     ];
     
-    // Generate deterministic hash from environment name
-    const hash = envName.split('').reduce((acc, char) => {
-      return acc + char.charCodeAt(0);
-    }, 0);
+    // Use multiple hash values combined for better distribution
+    let hash1 = 5381; // DJB2
+    let hash2 = 0;    // Simple positional hash
     
-    return colors[hash % colors.length];
+    for (let i = 0; i < envName.length; i++) {
+      const charCode = envName.charCodeAt(i);
+      // DJB2 hash
+      hash1 = ((hash1 << 5) + hash1) + charCode;
+      // Position-weighted hash
+      hash2 = hash2 * 31 + charCode * (i + 1);
+    }
+    
+    // Combine both hashes using XOR and ensure positive
+    const combinedHash = Math.abs((hash1 ^ hash2) >>> 0);
+    
+    return colors[combinedHash % colors.length];
   }
 
   /**

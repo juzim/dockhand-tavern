@@ -19,6 +19,12 @@ export function extractPorts(ports: DockhandPort[]): number[] {
   const uniquePorts = new Set<number>();
 
   for (const port of ports) {
+    // Skip ports without proper host exposure (not published to host)
+    if (!port.PublicPort || !port.IP) {
+      console.debug(`Skipping port without PublicPort or IP:`, port);
+      continue;
+    }
+    
     // Skip IPv6 entries (we only need one entry per port)
     if (port.IP === '::') continue;
     

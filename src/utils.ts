@@ -41,6 +41,29 @@ export function extractPorts(ports: DockhandPort[]): number[] {
 }
 
 /**
+ * Extract network IP address from dhcp-ext network only
+ * Returns null if no valid dhcp-ext network IP found
+ */
+export function extractNetworkIp(networks: Record<string, { ipAddress: string }>): string | null {
+  // Only look for dhcp-ext network
+  const dhcpExtNetwork = networks['dhcp-ext'];
+  
+  if (!dhcpExtNetwork) {
+    return null;
+  }
+  
+  const ip = dhcpExtNetwork.ipAddress;
+  
+  // Skip empty or invalid IPs
+  if (!ip || ip === '' || ip === '0.0.0.0') {
+    return null;
+  }
+  
+  console.debug(`Found dhcp-ext network IP:`, ip);
+  return ip;
+}
+
+/**
  * Find NPM proxy host that matches container IP:port
  * Returns the proxy host domain URL if found, null otherwise
  */
@@ -80,12 +103,13 @@ export function findNpmProxyUrl(
 
 /**
  * Build access URL for a container
- * Priority: 1) dockhand-tavern.url label, 2) NPM proxy host, 3) default http://IP:port
+ * Priority: 1) dockhand-tavern.url label, 2) NPM proxy host, 3) default http://IP:port or http://networkIP
  */
 export function buildContainerUrl(
   container: DockhandContainer,
-  firstPort: number,
+  firstPort: number | null,
   envPublicIp: string,
+  networkIp: string | null,
   npmProxyHosts?: NpmProxyHost[]
 ): string {
   // 1. Check for custom URL label (highest priority)
@@ -94,16 +118,29 @@ export function buildContainerUrl(
     return customUrl;
   }
 
-  // 2. Check NPM proxy hosts for match (if provided)
-  if (npmProxyHosts && npmProxyHosts.length > 0) {
+  // 2. If we have a port, check NPM proxy hosts for match
+  if (firstPort && npmProxyHosts && npmProxyHosts.length > 0) {
     const npmUrl = findNpmProxyUrl(envPublicIp, firstPort, npmProxyHosts);
     if (npmUrl) {
       return npmUrl;
     }
   }
 
-  // 3. Default: construct HTTP URL from first port
-  return `http://${envPublicIp}:${firstPort}`;
+  // 3. Build URL based on what's available
+  if (firstPort) {
+    // Has exposed port: use environment public IP with port
+    return `http://${envPublicIp}:${firstPort}`;
+  } else if (networkIp) {
+    // No exposed port but has network IP: use network IP with custom port or default 80
+    const customPort = container.labels?.['dockhand-tavern.port'];
+    if (customPort) {
+      return `http://${networkIp}:${customPort}`;
+    }
+    return `http://${networkIp}`;
+  }
+  
+  // Fallback (shouldn't happen if validation is correct)
+  return `http://${envPublicIp}`;
 }
 
 /**
@@ -162,11 +199,13 @@ export function processContainer(
     return null;
   }
 
-  // Extract ports
+  // Extract ports and network IP
   const ports = extractPorts(container.ports);
+  const networkIp = extractNetworkIp(container.networks);
 
-  // Skip containers with no exposed ports
-  if (ports.length === 0) {
+  // Skip containers with no exposed ports AND no network IP
+  if (ports.length === 0 && !networkIp) {
+    console.debug(`Skipping container ${container.name}: no exposed ports or network IP`);
     return null;
   }
 
@@ -181,8 +220,9 @@ export function processContainer(
     container.name;
   const icon = container.labels?.['dockhand-tavern.icon'];
 
-  // Build single URL from first port
-  const url = buildContainerUrl(container, ports[0], environment.publicIp, npmProxyHosts);
+  // Build URL from port or network IP
+  const firstPort = ports.length > 0 ? ports[0] : null;
+  const url = buildContainerUrl(container, firstPort, environment.publicIp, networkIp, npmProxyHosts);
 
   // Resolve icon URL
   const iconUrl = resolveIconUrl(icon, displayName);

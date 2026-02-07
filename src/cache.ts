@@ -149,8 +149,10 @@ export class CacheManager {
     let skippedCount = 0;
 
     for (const { container, env } of containersWithEnv) {
-      // Only process running containers
+      // CRITICAL: Only process running containers - skip all other states
+      // Docker states: running, exited, paused, restarting, removing, dead, created
       if (container.state !== 'running') {
+        console.debug(`Skipping NPM creation for "${container.name}" (state: ${container.state})`);
         continue;
       }
 
@@ -487,8 +489,10 @@ export class CacheManager {
     }
 
     for (const { container, env } of containersWithEnv) {
-      // Only process running containers
+      // CRITICAL: Only process running containers - skip all other states
+      // Docker states: running, exited, paused, restarting, removing, dead, created
       if (container.state !== 'running') {
+        console.debug(`Skipping monitor creation for "${container.name}" (state: ${container.state})`);
         continue;
       }
 

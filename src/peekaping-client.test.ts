@@ -5,7 +5,7 @@
 
 import { describe, test, expect, beforeEach, mock } from 'bun:test';
 import { PeekapingClient } from './peekaping-client';
-import type { PeekapingMonitor, PeekapingCreateMonitorRequest } from './peekaping-types';
+import type { PeekapingMonitor, PeekapingCreateMonitorRequest, PeekapingTag, PeekapingCreateTagRequest } from './peekaping-types';
 
 describe('PeekapingClient', () => {
   let client: PeekapingClient;
@@ -296,6 +296,159 @@ describe('PeekapingClient', () => {
 
       const result = await client.testConnection();
       expect(result).toBe(false);
+    });
+  });
+
+  describe('fetchTags', () => {
+    test('makes GET request to /api/v1/tags with API key header', async () => {
+      const mockTags: PeekapingTag[] = [
+        {
+          id: 'tag-123',
+          name: 'env:prod',
+          color: '#ef4444',
+          description: 'Production environment',
+          created_at: '2024-01-01T00:00:00Z',
+          updated_at: '2024-01-01T00:00:00Z',
+        },
+      ];
+
+      const mockFetch = mock(async (url: string, options: any) => {
+        expect(url).toBe('http://localhost:8034/api/v1/tags?limit=1000');
+        expect(options.headers['X-API-Key']).toBe(apiKey);
+        return {
+          ok: true,
+          json: async () => ({ data: mockTags }),
+        };
+      });
+
+      globalThis.fetch = mockFetch as any;
+
+      const result = await client.fetchTags();
+      expect(result).toEqual(mockTags);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    test('handles empty tags list', async () => {
+      const mockFetch = mock(async () => ({
+        ok: true,
+        json: async () => ({ data: [] }),
+      }));
+
+      globalThis.fetch = mockFetch as any;
+
+      const result = await client.fetchTags();
+      expect(result).toEqual([]);
+    });
+
+    test('handles null data field', async () => {
+      const mockFetch = mock(async () => ({
+        ok: true,
+        json: async () => ({ data: null }),
+      }));
+
+      globalThis.fetch = mockFetch as any;
+
+      const result = await client.fetchTags();
+      expect(result).toEqual([]);
+    });
+
+    test('throws error on failed request', async () => {
+      const mockFetch = mock(async () => ({
+        ok: false,
+        status: 500,
+      }));
+
+      globalThis.fetch = mockFetch as any;
+
+      await expect(client.fetchTags()).rejects.toThrow('Peekaping request failed: 500');
+    });
+  });
+
+  describe('createTag', () => {
+    test('makes POST request to /api/v1/tags with correct data', async () => {
+      const tagRequest: PeekapingCreateTagRequest = {
+        name: 'env:staging',
+        color: '#f59e0b',
+        description: 'Staging environment',
+      };
+
+      const createdTag: PeekapingTag = {
+        id: 'tag-456',
+        name: tagRequest.name,
+        color: tagRequest.color,
+        description: tagRequest.description!,
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+      };
+
+      const mockFetch = mock(async (url: string, options: any) => {
+        expect(url).toBe('http://localhost:8034/api/v1/tags');
+        expect(options.method).toBe('POST');
+        expect(options.headers['X-API-Key']).toBe(apiKey);
+        expect(options.headers['Content-Type']).toBe('application/json');
+        
+        const body = JSON.parse(options.body);
+        expect(body).toEqual(tagRequest);
+
+        return {
+          ok: true,
+          json: async () => ({ data: createdTag }),
+        };
+      });
+
+      globalThis.fetch = mockFetch as any;
+
+      const result = await client.createTag(tagRequest);
+      expect(result).toEqual(createdTag);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    test('creates tag without description', async () => {
+      const tagRequest: PeekapingCreateTagRequest = {
+        name: 'group:Media',
+        color: '#10b981',
+      };
+
+      const mockFetch = mock(async (url: string, options: any) => {
+        const body = JSON.parse(options.body);
+        expect(body.description).toBeUndefined();
+        
+        return {
+          ok: true,
+          json: async () => ({ 
+            data: { 
+              id: 'tag-789', 
+              ...tagRequest,
+              description: '',
+              created_at: '2024-01-01T00:00:00Z',
+              updated_at: '2024-01-01T00:00:00Z',
+            } 
+          }),
+        };
+      });
+
+      globalThis.fetch = mockFetch as any;
+
+      const result = await client.createTag(tagRequest);
+      expect(result.name).toBe(tagRequest.name);
+    });
+
+    test('throws error on 400 bad request', async () => {
+      const mockFetch = mock(async () => ({
+        ok: false,
+        status: 400,
+      }));
+
+      globalThis.fetch = mockFetch as any;
+
+      const tagRequest: PeekapingCreateTagRequest = {
+        name: 'invalid',
+        color: 'not-a-color',
+      };
+
+      await expect(client.createTag(tagRequest)).rejects.toThrow(
+        'Peekaping POST request failed: 400'
+      );
     });
   });
 });

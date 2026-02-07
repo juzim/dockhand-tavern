@@ -61,3 +61,18 @@ export interface PeekapingApiResponse<T> {
   message?: string;
   success?: boolean;
 }
+
+export interface PeekapingTag {
+  id: string;
+  name: string;
+  color: string;
+  description: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PeekapingCreateTagRequest {
+  name: string;                    // Required: tag name (max 100 chars)
+  color: string;                   // Required: hex color (e.g., "#3B82F6")
+  description?: string;            // Optional: tag description
+}

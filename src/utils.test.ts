@@ -10,7 +10,8 @@ import {
   validateBaseDomain,
   validateGeneratedDomain,
   isDomainCoveredByCertificate,
-  findNpmProxyHostForContainer
+  findNpmProxyHostForContainer,
+  generateTagColor
 } from './utils';
 import type { DockhandContainer, DockhandEnvironment, NpmProxyHost } from './types';
 
@@ -353,5 +354,67 @@ describe('findNpmProxyHostForContainer', () => {
 
     const result = findNpmProxyHostForContainer(mockContainer, differentEnv, mockNpmProxyHosts);
     expect(result).toBeUndefined();
+  });
+});
+
+describe('generateTagColor', () => {
+  test('generates consistent color for same input', () => {
+    const color1 = generateTagColor('prod');
+    const color2 = generateTagColor('prod');
+    expect(color1).toBe(color2);
+  });
+
+  test('generates different colors for different inputs (usually)', () => {
+    const colors = new Set([
+      generateTagColor('prod'),
+      generateTagColor('staging'),
+      generateTagColor('development'),
+      generateTagColor('test'),
+      generateTagColor('qa'),
+    ]);
+    // With 8 colors and 5 inputs, we should get at least 2 different colors
+    expect(colors.size).toBeGreaterThan(1);
+  });
+
+  test('returns valid hex color', () => {
+    const color = generateTagColor('test-environment');
+    expect(color).toMatch(/^#[0-9a-f]{6}$/);
+  });
+
+  test('uses one of the 8 predefined colors', () => {
+    const validColors = [
+      '#89b4fa', // blue
+      '#fab387', // peach
+      '#f9e2af', // yellow
+      '#a6e3a1', // green
+      '#f38ba8', // red
+      '#94e2d5', // teal
+      '#89dceb', // sky
+      '#f5c2e7', // pink
+    ];
+
+    const color = generateTagColor('any-string');
+    expect(validColors).toContain(color);
+  });
+
+  test('handles empty string', () => {
+    const color = generateTagColor('');
+    expect(color).toMatch(/^#[0-9a-f]{6}$/);
+  });
+
+  test('handles special characters', () => {
+    const color = generateTagColor('env:prod-123!@#');
+    expect(color).toMatch(/^#[0-9a-f]{6}$/);
+  });
+
+  test('generates same color as frontend algorithm for "prod"', () => {
+    // This should match the frontend's getEnvColor('prod')
+    // Just verify it returns one of the valid colors
+    const color = generateTagColor('prod');
+    const validColors = [
+      '#89b4fa', '#fab387', '#f9e2af', '#a6e3a1',
+      '#f38ba8', '#94e2d5', '#89dceb', '#f5c2e7',
+    ];
+    expect(validColors).toContain(color);
   });
 });

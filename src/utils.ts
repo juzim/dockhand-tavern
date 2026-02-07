@@ -591,6 +591,42 @@ export function findNpmProxyHostForContainer(
 }
 
 /**
+ * Generate consistent color for tag using hash algorithm
+ * Duplicates the frontend algorithm from app.js for consistency
+ * Uses DJB2 hash combined with positional hash for better distribution
+ */
+export function generateTagColor(name: string): string {
+  // 8 colors from frontend (Catppuccin Mocha palette)
+  const TAG_COLORS = [
+    '#89b4fa', // blue
+    '#fab387', // peach
+    '#f9e2af', // yellow
+    '#a6e3a1', // green
+    '#f38ba8', // red
+    '#94e2d5', // teal
+    '#89dceb', // sky
+    '#f5c2e7', // pink
+  ];
+  
+  // Use multiple hash values combined for better distribution
+  let hash1 = 5381; // DJB2
+  let hash2 = 0;    // Simple positional hash
+  
+  for (let i = 0; i < name.length; i++) {
+    const charCode = name.charCodeAt(i);
+    // DJB2 hash
+    hash1 = ((hash1 << 5) + hash1) + charCode;
+    // Position-weighted hash
+    hash2 = hash2 * 31 + charCode * (i + 1);
+  }
+  
+  // Combine both hashes using XOR and ensure positive
+  const combinedHash = Math.abs((hash1 ^ hash2) >>> 0);
+  
+  return TAG_COLORS[combinedHash % TAG_COLORS.length];
+}
+
+/**
  * Parse BOOKMARKS environment variable into ProcessedContainer objects
  * Expected format: [{"name":"Foo","url":"https://example.com","icon":"optional","group":"optional"}]
  */

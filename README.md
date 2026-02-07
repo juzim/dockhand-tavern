@@ -365,6 +365,60 @@ services:
 - **Error Handling**: Failed creations are logged but don't stop other containers from being processed
 - **Notifications**: If no notification IDs are configured, monitors are created without notifications
 
+### Monitor Tags
+
+Monitors are automatically tagged for easy organization:
+
+**1. Environment Tag** (`env:xxx`)
+- Based on Dockhand environment name
+- Example: `env:prod`, `env:staging`, `env:dev`
+- Color: Consistent hash-based color (same algorithm as frontend environment ribbons)
+
+**2. Group Tag** (`group:xxx`) - *Optional*
+- Based on `dockhand-tavern.group` label
+- Example: `group:Media`, `group:Productivity`
+- Color: Consistent hash-based color
+- Only added if the label exists on the container
+
+**3. Auto-created Tag** (`dockhand-tavern`)
+- Indicates monitor was created automatically by Dockhand Tavern
+- Color: Blue (#3b82f6)
+- Added to all auto-created monitors
+
+**Tag Colors:**
+
+Tags use the same hash-based color algorithm as the frontend environment ribbons, which:
+- Generates one of 8 Catppuccin Mocha colors
+- Ensures the same name always gets the same color
+- Provides visual consistency across dashboard and Peekaping
+- Creates good color distribution
+
+**Example:**
+
+```yaml
+# Environment: prod
+services:
+  nextcloud:
+    labels:
+      dockhand-tavern.group: "Productivity"
+```
+
+Monitor created with 3 tags:
+- `env:prod` (consistent color based on "prod" hash)
+- `group:Productivity` (consistent color based on "Productivity" hash)
+- `dockhand-tavern` (blue)
+
+```yaml
+# Environment: staging
+services:
+  redis:
+    # No group label
+```
+
+Monitor created with 2 tags:
+- `env:staging` (consistent color based on "staging" hash)
+- `dockhand-tavern` (blue)
+
 ## Deployment
 
 ### Docker Compose Example

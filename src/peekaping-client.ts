@@ -6,6 +6,8 @@
 import type { 
   PeekapingMonitor, 
   PeekapingCreateMonitorRequest,
+  PeekapingTag,
+  PeekapingCreateTagRequest,
   PeekapingApiResponse 
 } from './peekaping-types';
 
@@ -86,6 +88,21 @@ export class PeekapingClient {
    */
   async createMonitor(data: PeekapingCreateMonitorRequest): Promise<PeekapingMonitor> {
     return this.postRequest<PeekapingMonitor>('/api/v1/monitors', data);
+  }
+
+  /**
+   * Fetch all tags from Peekaping
+   */
+  async fetchTags(): Promise<PeekapingTag[]> {
+    // Fetch with high limit to get all tags (default is 10)
+    return this.request<PeekapingTag[]>('/api/v1/tags?limit=1000');
+  }
+
+  /**
+   * Create a new tag in Peekaping
+   */
+  async createTag(data: PeekapingCreateTagRequest): Promise<PeekapingTag> {
+    return this.postRequest<PeekapingTag>('/api/v1/tags', data);
   }
 
   /**

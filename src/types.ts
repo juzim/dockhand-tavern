@@ -6,7 +6,12 @@
 export type { NpmProxyHost, NpmAuthResponse } from './npm-types';
 
 // Export Peekaping types
-export type { PeekapingMonitor, PeekapingCreateMonitorRequest } from './peekaping-types';
+export type { 
+  PeekapingMonitor, 
+  PeekapingCreateMonitorRequest,
+  PeekapingTag,
+  PeekapingCreateTagRequest
+} from './peekaping-types';
 
 // Dockhand API Response Types
 export interface DockhandEnvironment {

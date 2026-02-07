@@ -6,9 +6,9 @@
 import { DockhandClient } from './dockhand-client';
 import { NpmClient } from './npm-client';
 import { PeekapingClient } from './peekaping-client';
-import { processContainer, parseBookmarks, buildDomainName, findProxyHostByDomain, validateBaseDomain, validateGeneratedDomain, isDomainCoveredByCertificate, extractDomainFromUrl, findNpmProxyHostForContainer } from './utils';
+import { processContainer, parseBookmarks, buildDomainName, findProxyHostByDomain, validateBaseDomain, validateGeneratedDomain, isDomainCoveredByCertificate, extractDomainFromUrl, findNpmProxyHostForContainer, generateTagColor } from './utils';
 import { extractPorts } from './utils';
-import type { CacheData, ProcessedContainer, NpmProxyHost, DockhandContainer, DockhandEnvironment, PeekapingMonitor, PeekapingCreateMonitorRequest } from './types';
+import type { CacheData, ProcessedContainer, NpmProxyHost, DockhandContainer, DockhandEnvironment, PeekapingMonitor, PeekapingCreateMonitorRequest, PeekapingTag } from './types';
 import type { NpmCreateProxyHostRequest, NpmCertificate } from './npm-types';
 
 export class CacheManager {
@@ -39,6 +39,11 @@ export class CacheManager {
   private peekapingDefaultTimeout: number = 16;
   private peekapingDefaultMaxRetries: number = 3;
   private autoCreatedMonitors: Map<string, string> = new Map(); // containerId → monitorId mapping
+  
+  // Peekaping tag management
+  private tagCache: Map<string, PeekapingTag> = new Map(); // tagName → tag object
+  private readonly DOCKHAND_TAG = 'dockhand-tavern';
+  private readonly DOCKHAND_TAG_COLOR = '#3b82f6';
 
   constructor(
     npmClient?: NpmClient,
@@ -357,6 +362,79 @@ export class CacheManager {
   }
 
   /**
+   * Ensure tag exists in Peekaping, create if needed
+   * Returns tag ID
+   */
+  private async ensureTag(
+    name: string,
+    color: string,
+    description: string
+  ): Promise<string> {
+    // Check cache first
+    if (this.tagCache.has(name)) {
+      const cached = this.tagCache.get(name)!;
+      
+      // Log if colors differ
+      if (cached.color !== color) {
+        console.warn(`⚠️  Tag "${name}" exists with different color`);
+        console.warn(`   Expected: ${color}, Found: ${cached.color}`);
+        console.warn(`   Using existing tag (not updating)`);
+      }
+      
+      return cached.id;
+    }
+    
+    // Tag not in cache, create it
+    try {
+      const tag = await this.peekapingClient!.createTag({
+        name,
+        color,
+        description,
+      });
+      
+      this.tagCache.set(name, tag);
+      console.log(`✅ Created tag: "${name}" (${color})`);
+      return tag.id;
+    } catch (error) {
+      console.error(`❌ Failed to create tag "${name}":`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get or create environment tag
+   */
+  private async ensureEnvironmentTag(envName: string): Promise<string> {
+    const tagName = `env:${envName}`;
+    const color = generateTagColor(envName);
+    const description = `Dockhand environment: ${envName}`;
+    
+    return this.ensureTag(tagName, color, description);
+  }
+
+  /**
+   * Get or create group tag
+   */
+  private async ensureGroupTag(groupName: string): Promise<string> {
+    const tagName = `group:${groupName}`;
+    const color = generateTagColor(groupName);
+    const description = `Service group: ${groupName}`;
+    
+    return this.ensureTag(tagName, color, description);
+  }
+
+  /**
+   * Get or create dockhand-tavern tag
+   */
+  private async ensureDockhandTag(): Promise<string> {
+    return this.ensureTag(
+      this.DOCKHAND_TAG,
+      this.DOCKHAND_TAG_COLOR,
+      'Automatically created by Dockhand Tavern'
+    );
+  }
+
+  /**
    * Automatically create Peekaping monitors for containers
    * Called during cache refresh when Peekaping client is enabled
    */
@@ -373,6 +451,17 @@ export class CacheManager {
 
     let createdCount = 0;
     let skippedCount = 0;
+
+    // Clear and load tag cache
+    this.tagCache.clear();
+    try {
+      const tags = await this.peekapingClient.fetchTags();
+      tags.forEach(tag => this.tagCache.set(tag.name, tag));
+      console.log(`✅ Loaded ${tags.length} existing Peekaping tag(s)`);
+    } catch (error) {
+      console.error('⚠️  Failed to fetch Peekaping tags:', error);
+      // Continue - we'll create tags as needed
+    }
 
     // Fetch existing monitors
     let existingMonitors: PeekapingMonitor[] = [];
@@ -482,6 +571,28 @@ export class CacheManager {
         continue;
       }
 
+      // Collect tag IDs for this monitor
+      const tagIds: string[] = [];
+      try {
+        // 1. Environment tag (always)
+        const envTagId = await this.ensureEnvironmentTag(env.name);
+        tagIds.push(envTagId);
+        
+        // 2. Group tag (only if label exists)
+        const groupLabel = container.labels?.['dockhand-tavern.group'];
+        if (groupLabel) {
+          const groupTagId = await this.ensureGroupTag(groupLabel);
+          tagIds.push(groupTagId);
+        }
+        
+        // 3. Dockhand-tavern tag (always)
+        const dockhandTagId = await this.ensureDockhandTag();
+        tagIds.push(dockhandTagId);
+      } catch (error) {
+        console.error(`⚠️  Failed to prepare tags for "${displayName}":`, error);
+        // Continue without tags rather than failing entirely
+      }
+
       // Create new monitor
       const monitorRequest: PeekapingCreateMonitorRequest = {
         name: displayName,
@@ -504,6 +615,7 @@ export class CacheManager {
         timeout: this.peekapingDefaultTimeout,
         max_retries: this.peekapingDefaultMaxRetries,
         retry_interval: this.peekapingDefaultInterval,
+        tag_ids: tagIds,
       };
 
       try {

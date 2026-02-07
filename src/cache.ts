@@ -73,6 +73,16 @@ export class CacheManager {
 
     // Validate NPM auto-creation configuration
     if (npmAutoCreateDomain && npmCertificateId !== undefined && npmCertificateId !== null) {
+      // REQUIRE NPM_DEFAULT_ACCESS_LIST_ID for security
+      if (npmDefaultAccessListId === undefined || npmDefaultAccessListId === null) {
+        logger.warn('[NPM] NPM_DEFAULT_ACCESS_LIST_ID is required for NPM auto-creation');
+        logger.warn('[NPM]   This prevents accidentally creating publicly accessible proxy hosts');
+        logger.warn('[NPM]   NPM auto-creation disabled');
+        this.npmAutoCreateDomain = null;
+        this.npmCertificateId = null;
+        return;
+      }
+
       // Validate base domain format
       if (!validateBaseDomain(npmAutoCreateDomain)) {
         logger.error(`[NPM] Invalid NPM_AUTO_CREATE_DOMAIN: "${npmAutoCreateDomain}"`);
@@ -281,12 +291,21 @@ export class CacheManager {
 
       // Determine access list ID based on dockhand-tavern.public label
       const isPublic = container.labels?.['dockhand-tavern.public'] === 'true';
-      let accessListId = 0; // Default: no access list (public)
+      
+      // Check if public label is set but public access list is not configured
+      if (isPublic && this.npmPublicAccessListId === null) {
+        logger.warn(`[NPM] Container "${container.name}" has public label but NPM_PUBLIC_ACCESS_LIST_ID not configured`);
+        logger.warn('[NPM]   Skipping proxy host creation (public access list required)');
+        skippedCount++;
+        continue;
+      }
+
+      // Determine access list ID
+      // npmDefaultAccessListId is always set here (validated in constructor)
+      let accessListId = this.npmDefaultAccessListId!;
 
       if (isPublic && this.npmPublicAccessListId !== null) {
         accessListId = this.npmPublicAccessListId;
-      } else if (!isPublic && this.npmDefaultAccessListId !== null) {
-        accessListId = this.npmDefaultAccessListId;
       }
 
       // Build proxy host request

@@ -40,3 +40,33 @@ export interface NpmAuthResponse {
     is_disabled: boolean;
   };
 }
+
+export interface NpmCreateProxyHostRequest {
+  domain_names: string[];           // Array of domain names
+  forward_scheme: string;            // "http" or "https"
+  forward_host: string;              // IP or hostname
+  forward_port: number;              // Port number
+  access_list_id: number;            // 0 for none, or specific access list ID
+  certificate_id: number;            // Certificate ID
+  ssl_forced: boolean;               // Force HTTPS redirect
+  http2_support: boolean;            // Enable HTTP/2
+  hsts_enabled: boolean;             // Enable HSTS
+  hsts_subdomains: boolean;          // Include subdomains in HSTS
+  caching_enabled: boolean;          // Enable caching
+  block_exploits: boolean;           // Block common exploits
+  allow_websocket_upgrade: boolean;  // Allow websocket upgrade
+  enabled: boolean;                  // Enable proxy host
+}
+
+export interface NpmCertificate {
+  id: number;
+  created_on: string;
+  modified_on: string;
+  provider: string;                  // "letsencrypt" or "other"
+  nice_name: string;                 // Display name
+  domain_names: string[];            // Domains covered (may include wildcards like *.example.com)
+  expires_on: string;                // ISO date string
+  owner_user_id: number;
+  is_deleted: number;                // 0 or 1
+  meta: Record<string, any>;         // Provider-specific metadata
+}

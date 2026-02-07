@@ -82,6 +82,13 @@ NPM_URL=http://localhost:81              # NPM instance URL
 NPM_EMAIL=admin@example.com              # NPM admin email
 NPM_PASSWORD=your-npm-password           # NPM password
 
+# NPM Auto-Creation - Optional (requires NPM integration above)
+# Automatically creates NPM proxy hosts for containers
+NPM_AUTO_CREATE_DOMAIN=example.com       # Base domain (creates: servicename.example.com)
+NPM_CERTIFICATE_ID=1                     # Certificate ID from NPM to use for SSL
+NPM_PUBLIC_ACCESS_LIST_ID=1              # Access list ID for public containers (optional)
+NPM_DEFAULT_ACCESS_LIST_ID=2             # Access list ID for private containers (optional)
+
 # Bookmarks are static entries
 BOOKMARKS='[
   {"name":"GitHub","url":"https://github.com","icon":"github"},
@@ -119,8 +126,160 @@ services:
 - `dockhand-tavern.icon` - Icon name from [selfh.st/icons](https://selfh.st/icons) or full URL
 - `dockhand-tavern.group` - Group name for organizing containers
 - `dockhand-tavern.port` - Custom port for containers on dhcp-ext network (when no exposed ports)
+- `dockhand-tavern.public` - Set to `true` to use public access list in NPM (requires NPM_PUBLIC_ACCESS_LIST_ID)
 - `dockhand-tavern.disable` - Set to `true` to hide container from dashboard
 
+## NPM Auto-Creation
+
+When NPM auto-creation is enabled (via `NPM_AUTO_CREATE_DOMAIN` and `NPM_CERTIFICATE_ID`), Dockhand Tavern will automatically create Nginx Proxy Manager proxy hosts for your containers.
+
+### Domain Selection Priority
+
+Dockhand Tavern determines which domain to create using the following priority order:
+
+**1. Custom URL** (`dockhand-tavern.url`)
+- If set to an HTTPS domain, extracts the domain from the URL
+- Example: `https://cloud.ltrg.de` → creates `cloud.ltrg.de`
+- ❌ **Skips** HTTP URLs, IP addresses, and URLs with custom ports
+
+**2. Custom Name** (`dockhand-tavern.name`)
+- If set, uses the custom name (sanitized) for domain generation
+- Example: `Immich` → creates `immich.{baseDomain}`
+- Spaces and special chars are converted to hyphens
+
+**3. Service Name** (`com.docker.compose.service`)
+- Uses the Docker Compose service name (sanitized)
+- Example: `nextcloud` → creates `nextcloud.{baseDomain}`
+
+**4. Container Name** (fallback)
+- Uses the container name if no other labels are set
+- Example: `standalone-app` → creates `standalone-app.{baseDomain}`
+
+#### Examples
+
+```yaml
+# Example 1: Custom URL (highest priority)
+services:
+  nextcloud:
+    labels:
+      dockhand-tavern.url: "https://cloud.ltrg.de"
+      dockhand-tavern.name: "My Cloud"  # Ignored
+# NPM entry created: cloud.ltrg.de
+
+# Example 2: Custom Name
+services:
+  immich-server:
+    labels:
+      dockhand-tavern.name: "Immich"
+# NPM entry created: immich.ltrg.de (NOT immich-server.ltrg.de)
+
+# Example 3: Service Name
+services:
+  nextcloud:
+    # No custom labels
+# NPM entry created: nextcloud.ltrg.de
+```
+
+**Skipped URLs:**
+- ❌ HTTP URLs: `http://example.com` (not secure)
+- ❌ IP addresses: `https://192.168.1.100` (not domain-based)
+- ❌ Custom ports: `https://app.com:8443` (non-standard, including explicit :443)
+
+### How it Works
+
+1. **Auto-Creation Triggers**:
+   - On startup (initial cache population)
+   - When webhook is received from Dockhand (container state changes)
+
+2. **Proxy Host Configuration**:
+   - **Domain**: `{serviceName}.{NPM_AUTO_CREATE_DOMAIN}`
+   - **Forward Host**: Environment's public IP
+   - **Forward Port**: Container's first exposed port
+   - **SSL Certificate**: Uses the certificate ID specified in `NPM_CERTIFICATE_ID`
+   - **SSL Forced**: Always enabled (HTTP → HTTPS redirect)
+   - **HTTP/2**: Enabled
+   - **HSTS**: Enabled (without subdomains)
+   - **Block Exploits**: Enabled
+   - **WebSocket Upgrade**: Enabled
+
+4. **Access Control**:
+   - Use `dockhand-tavern.public: "true"` label to apply `NPM_PUBLIC_ACCESS_LIST_ID`
+   - Containers without this label use `NPM_DEFAULT_ACCESS_LIST_ID`
+   - If access list IDs are not configured, no access control is applied (fully public)
+
+### Example Configuration
+
+```bash
+# .env
+NPM_URL=http://192.168.1.100:81
+NPM_EMAIL=admin@example.com
+NPM_PASSWORD=changeme
+
+NPM_AUTO_CREATE_DOMAIN=ltrg.de
+NPM_CERTIFICATE_ID=1
+NPM_PUBLIC_ACCESS_LIST_ID=1    # Optional: for public containers
+NPM_DEFAULT_ACCESS_LIST_ID=2   # Optional: for private containers
+```
+
+```yaml
+# docker-compose.yml (your service)
+services:
+  sonarr:
+    image: linuxserver/sonarr
+    labels:
+      dockhand-tavern.group: "Media"
+      dockhand-tavern.public: "true"  # Use public access list
+```
+
+This will automatically create an NPM proxy host:
+- Domain: `sonarr.ltrg.de`
+- SSL: Enabled with certificate ID 1
+- Access: Protected by access list ID 1 (public)
+
+### Validation
+
+NPM auto-creation includes comprehensive validation to prevent invalid proxy hosts:
+
+1. **Base Domain Validation** (startup-time):
+   - `NPM_AUTO_CREATE_DOMAIN` must be a valid DNS domain (e.g., `ltrg.de`, `sub.example.com`)
+   - ❌ Wildcards are NOT allowed (e.g., `*.ltrg.de` will be rejected)
+   - ❌ Invalid formats will disable auto-creation entirely with an error message
+
+2. **Generated Domain Validation** (runtime):
+   - Each generated domain is validated before creation
+   - Checks for invalid characters, proper DNS format, length limits
+   - Invalid domains are skipped with a warning
+
+3. **Certificate Coverage Validation** (runtime):
+   - Fetches certificate details on startup
+   - Verifies each domain is covered by the certificate
+   - Supports wildcard certificates (e.g., `*.ltrg.de` covers `app.ltrg.de` but not `sub.app.ltrg.de`)
+   - Provides helpful hints if domain doesn't match certificate
+
+### Example Validation Errors
+
+**Invalid base domain:**
+```
+❌ Invalid NPM_AUTO_CREATE_DOMAIN: "*.ltrg.de"
+   Domain format is invalid (cannot contain wildcards, must be valid DNS name)
+   NPM auto-creation disabled
+```
+
+**Domain not covered by certificate:**
+```
+⚠️  Skipping NPM creation for container "nextcloud"
+   Generated domain "nextcloud.example.com" is not covered by certificate ID 1
+   Certificate covers: [*.ltrg.de, ltrg.de]
+   Hint: Consider using base domain "ltrg.de" instead of "example.com"
+```
+
+### Behavior
+
+- **Existing Domains**: If a domain already exists in NPM, it will NOT be modified
+- **Mismatch Detection**: If an existing domain points to a different target, a warning is logged
+- **No Duplicates**: The same domain will never be created twice
+- **Error Handling**: Failed creations are logged but don't stop other containers from being processed
+- **Validation Enforcement**: Validation cannot be disabled - invalid configurations will prevent auto-creation
 
 ## Deployment
 

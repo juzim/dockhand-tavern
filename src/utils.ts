@@ -103,14 +103,20 @@ export function findNpmProxyUrl(
 
 /**
  * Build access URL for a container
- * Priority: 1) dockhand-tavern.url label, 2) dockhand-tavern.port with networkIP, 3) NPM proxy host, 4) default http://IP:port
+ * Priority: 
+ * 1) dockhand-tavern.url label (custom URL)
+ * 2) Auto-created NPM domain (from NPM auto-creation)
+ * 3) dockhand-tavern.port with networkIP
+ * 4) Existing NPM proxy host (manual entry)
+ * 5) Default http://IP:port (fallback)
  */
 export function buildContainerUrl(
   container: DockhandContainer,
   firstPort: number | null,
   envPublicIp: string,
   networkIp: string | null,
-  npmProxyHosts?: NpmProxyHost[]
+  npmProxyHosts?: NpmProxyHost[],
+  autoCreatedDomain?: string
 ): string {
   // 1. Check for custom URL label (highest priority)
   const customUrl = container.labels?.['dockhand-tavern.url'];
@@ -119,13 +125,19 @@ export function buildContainerUrl(
     return customUrl;
   }
 
-  // 2. Check for custom port label with network IP (second priority)
+  // 2. Check for auto-created NPM domain (second priority)
+  if (autoCreatedDomain) {
+    console.log(`[DEBUG] Container ${container.name} using auto-created domain: https://${autoCreatedDomain}`);
+    return `https://${autoCreatedDomain}`;
+  }
+
+  // 3. Check for custom port label with network IP (third priority)
   const customPort = container.labels?.['dockhand-tavern.port'];
   if (customPort && networkIp) {
     return `http://${networkIp}:${customPort}`;
   }
 
-  // 3. If we have an exposed port, check NPM proxy hosts for match
+  // 4. If we have an exposed port, check NPM proxy hosts for match (fourth priority)
   if (firstPort && npmProxyHosts && npmProxyHosts.length > 0) {
     const npmUrl = findNpmProxyUrl(envPublicIp, firstPort, npmProxyHosts);
     if (npmUrl) {
@@ -133,7 +145,7 @@ export function buildContainerUrl(
     }
   }
 
-  // 4. Build URL based on what's available
+  // 5. Build URL based on what's available (fallback)
   if (firstPort) {
     // Has exposed port: use environment public IP with port
     return `http://${envPublicIp}:${firstPort}`;
@@ -189,7 +201,8 @@ export function resolveIconUrl(
 export function processContainer(
   container: DockhandContainer,
   environment: DockhandEnvironment,
-  npmProxyHosts?: NpmProxyHost[]
+  npmProxyHosts?: NpmProxyHost[],
+  autoCreatedDomain?: string
 ): ProcessedContainer | null {
   // Debug: Log all dockhand-tavern labels
   const tavernLabels = Object.entries(container.labels || {})
@@ -232,7 +245,7 @@ export function processContainer(
 
   // Build URL from port or network IP
   const firstPort = ports.length > 0 ? ports[0] : null;
-  const url = buildContainerUrl(container, firstPort, environment.publicIp, networkIp, npmProxyHosts);
+  const url = buildContainerUrl(container, firstPort, environment.publicIp, networkIp, npmProxyHosts, autoCreatedDomain);
 
   // Resolve icon URL
   const iconUrl = resolveIconUrl(icon, displayName);
@@ -309,6 +322,246 @@ export function getUniqueEnvironments(
 }
 
 
+
+/**
+ * Validate base domain format for NPM auto-creation
+ * Returns true if domain is valid (e.g., "example.com", "sub.example.com")
+ * Returns false for invalid formats (e.g., "*.example.com", "example.*", "", ".")
+ */
+export function validateBaseDomain(domain: string): boolean {
+  if (!domain || domain.length === 0) {
+    return false;
+  }
+
+  // Reject domains with wildcards
+  if (domain.includes('*')) {
+    return false;
+  }
+
+  // Reject domains with leading or trailing dots
+  if (domain.startsWith('.') || domain.endsWith('.')) {
+    return false;
+  }
+
+  // Validate domain format: must be valid DNS name
+  // Pattern: lowercase letters, numbers, hyphens, and dots
+  // Each label (part between dots) must start/end with alphanumeric
+  // Must have at least one dot and a valid TLD
+  const domainPattern = /^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i;
+  
+  if (!domainPattern.test(domain)) {
+    return false;
+  }
+
+  // Check total length (max 253 chars for DNS)
+  if (domain.length > 253) {
+    return false;
+  }
+
+  // Check each label length (max 63 chars per label)
+  const labels = domain.split('.');
+  for (const label of labels) {
+    if (label.length > 63) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Validate final generated domain format
+ * Returns true if domain is DNS-compatible and contains no invalid characters
+ */
+export function validateGeneratedDomain(domain: string): boolean {
+  if (!domain || domain.length === 0) {
+    return false;
+  }
+
+  // Check for wildcards or other invalid characters
+  if (domain.includes('*') || domain.includes(' ')) {
+    return false;
+  }
+
+  // Check for leading or trailing dots/hyphens
+  if (domain.startsWith('.') || domain.endsWith('.') || 
+      domain.startsWith('-') || domain.endsWith('-')) {
+    return false;
+  }
+
+  // Validate DNS-compatible format
+  const domainPattern = /^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i;
+  
+  if (!domainPattern.test(domain)) {
+    return false;
+  }
+
+  // Check total length
+  if (domain.length > 253) {
+    return false;
+  }
+
+  // Check label lengths
+  const labels = domain.split('.');
+  for (const label of labels) {
+    if (label.length === 0 || label.length > 63) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Check if a domain is covered by a certificate's domain list
+ * Supports wildcard certificates (e.g., *.example.com)
+ * 
+ * Examples:
+ * - "app.example.com" matches ["app.example.com"] (exact match)
+ * - "app.example.com" matches ["*.example.com"] (wildcard match)
+ * - "sub.app.example.com" does NOT match ["*.example.com"] (wildcard only matches one level)
+ */
+export function isDomainCoveredByCertificate(
+  domain: string,
+  certDomains: string[]
+): boolean {
+  const domainLower = domain.toLowerCase();
+
+  for (const certDomain of certDomains) {
+    const certDomainLower = certDomain.toLowerCase();
+
+    // Exact match
+    if (domainLower === certDomainLower) {
+      return true;
+    }
+
+    // Wildcard match
+    if (certDomainLower.startsWith('*.')) {
+      const baseDomain = certDomainLower.substring(2); // Remove "*."
+      
+      // Check if domain ends with the base domain
+      if (domainLower.endsWith('.' + baseDomain)) {
+        // Count dots to ensure wildcard only matches one level
+        // "app.example.com" has 1 dot before base domain -> matches "*.example.com"
+        // "sub.app.example.com" has 2 dots before base domain -> doesn't match "*.example.com"
+        const domainWithoutBase = domainLower.substring(0, domainLower.length - baseDomain.length - 1);
+        const dotCount = (domainWithoutBase.match(/\./g) || []).length;
+        
+        if (dotCount === 0) {
+          return true; // Only one level before base domain
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Extract domain from URL for NPM auto-creation
+ * Returns the domain if valid, or null if URL should be skipped
+ * 
+ * Rejects:
+ * - HTTP URLs (only HTTPS supported)
+ * - IP addresses (IPv4)
+ * - URLs with custom ports (including explicit :443)
+ * - Invalid domain formats
+ * 
+ * Examples:
+ * - "https://cloud.ltrg.de" → "cloud.ltrg.de"
+ * - "https://cloud.ltrg.de/path" → "cloud.ltrg.de"
+ * - "http://cloud.ltrg.de" → null (HTTP)
+ * - "https://192.168.1.100" → null (IP)
+ * - "https://cloud.ltrg.de:8443" → null (custom port)
+ * - "https://cloud.ltrg.de:443" → null (explicit 443)
+ */
+export function extractDomainFromUrl(url: string): string | null {
+  // Must start with https://
+  if (!url || !url.startsWith('https://')) {
+    return null;
+  }
+
+  // Remove protocol
+  const withoutProtocol = url.replace('https://', '');
+  
+  // Extract hostname (before first slash for path)
+  const hostname = withoutProtocol.split('/')[0].split('?')[0];
+  
+  // Reject URLs with ANY port (including :443)
+  if (hostname.includes(':')) {
+    return null;
+  }
+  
+  // Check if it's an IP address (IPv4)
+  const ipv4Pattern = /^(\d{1,3}\.){3}\d{1,3}$/;
+  if (ipv4Pattern.test(hostname)) {
+    return null;
+  }
+  
+  // Validate domain format
+  if (!validateGeneratedDomain(hostname)) {
+    return null;
+  }
+  
+  return hostname;
+}
+
+/**
+ * Check if a URL is domain-eligible for NPM auto-creation
+ * Returns true if URL starts with https:// AND is not an IP address
+ */
+export function isDomainEligible(url: string): boolean {
+  // Must start with https://
+  if (!url.startsWith('https://')) {
+    return false;
+  }
+
+  // Extract hostname from URL (remove protocol and path)
+  const withoutProtocol = url.replace(/^https?:\/\//, '');
+  const hostname = withoutProtocol.split('/')[0].split(':')[0];
+
+  // Check if hostname is an IP address (IPv4 or IPv6)
+  // IPv4 pattern: xxx.xxx.xxx.xxx
+  const ipv4Pattern = /^(\d{1,3}\.){3}\d{1,3}$/;
+  // IPv6 pattern (simplified - covers most cases)
+  const ipv6Pattern = /^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$/;
+
+  if (ipv4Pattern.test(hostname) || ipv6Pattern.test(hostname)) {
+    return false; // It's an IP address, skip
+  }
+
+  return true; // It's a domain
+}
+
+/**
+ * Build domain name from service name and base domain
+ * Sanitizes service name to be DNS-compatible
+ */
+export function buildDomainName(serviceName: string, baseDomain: string): string {
+  // Sanitize service name: lowercase, replace invalid chars with hyphens
+  const sanitized = serviceName
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, '-')  // Replace invalid chars with hyphens
+    .replace(/^-+|-+$/g, '')      // Remove leading/trailing hyphens
+    .replace(/-+/g, '-');         // Collapse multiple hyphens
+
+  return `${sanitized}.${baseDomain}`;
+}
+
+/**
+ * Find NPM proxy host by domain name
+ * Returns the proxy host if domain exists in domain_names array, null otherwise
+ */
+export function findProxyHostByDomain(
+  domain: string,
+  npmProxyHosts: NpmProxyHost[]
+): NpmProxyHost | null {
+  const match = npmProxyHosts.find(host =>
+    host.domain_names.includes(domain)
+  );
+
+  return match || null;
+}
 
 /**
  * Parse BOOKMARKS environment variable into ProcessedContainer objects

@@ -3,7 +3,7 @@
  * Handles authentication and API requests to NPM
  */
 
-import type { NpmProxyHost, NpmAuthResponse } from './npm-types';
+import type { NpmProxyHost, NpmAuthResponse, NpmCreateProxyHostRequest, NpmCertificate } from './npm-types';
 
 export class NpmClient {
   private baseUrl: string;
@@ -97,10 +97,72 @@ export class NpmClient {
   }
 
   /**
+   * Make authenticated POST request to NPM API
+   */
+  private async postRequest<T>(path: string, body: any): Promise<T> {
+    await this.ensureAuthenticated();
+
+    try {
+      const response = await fetch(`${this.baseUrl}${path}`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (response.status === 401) {
+        // Token expired, re-authenticate and retry
+        this.token = null;
+        await this.authenticate();
+        
+        const retryResponse = await fetch(`${this.baseUrl}${path}`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${this.token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(body),
+        });
+
+        if (!retryResponse.ok) {
+          throw new Error(`NPM POST request failed: ${retryResponse.status}`);
+        }
+
+        return retryResponse.json();
+      }
+
+      if (!response.ok) {
+        throw new Error(`NPM POST request failed: ${response.status}`);
+      }
+
+      return response.json();
+    } catch (error) {
+      console.error(`NPM API POST request error (${path}):`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Fetch all proxy hosts from NPM
    */
   async fetchProxyHosts(): Promise<NpmProxyHost[]> {
     return this.request<NpmProxyHost[]>('/api/nginx/proxy-hosts');
+  }
+
+  /**
+   * Create a new proxy host in NPM
+   */
+  async createProxyHost(data: NpmCreateProxyHostRequest): Promise<NpmProxyHost> {
+    return this.postRequest<NpmProxyHost>('/api/nginx/proxy-hosts', data);
+  }
+
+  /**
+   * Fetch certificate details by ID from NPM
+   */
+  async fetchCertificate(certificateId: number): Promise<NpmCertificate> {
+    return this.request<NpmCertificate>(`/api/nginx/certificates/${certificateId}`);
   }
 
   /**

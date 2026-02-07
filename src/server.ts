@@ -20,6 +20,12 @@ const NPM_URL = process.env.NPM_URL;
 const NPM_EMAIL = process.env.NPM_EMAIL;
 const NPM_PASSWORD = process.env.NPM_PASSWORD;
 
+// NPM auto-creation environment variables (optional)
+const NPM_AUTO_CREATE_DOMAIN = process.env.NPM_AUTO_CREATE_DOMAIN;
+const NPM_CERTIFICATE_ID = process.env.NPM_CERTIFICATE_ID ? parseInt(process.env.NPM_CERTIFICATE_ID, 10) : undefined;
+const NPM_PUBLIC_ACCESS_LIST_ID = process.env.NPM_PUBLIC_ACCESS_LIST_ID ? parseInt(process.env.NPM_PUBLIC_ACCESS_LIST_ID, 10) : undefined;
+const NPM_DEFAULT_ACCESS_LIST_ID = process.env.NPM_DEFAULT_ACCESS_LIST_ID ? parseInt(process.env.NPM_DEFAULT_ACCESS_LIST_ID, 10) : undefined;
+
 // Validate configuration
 if (!DOCKHAND_PASSWORD) {
   console.error('❌ DOCKHAND_PASSWORD environment variable is required!');
@@ -43,6 +49,24 @@ if (NPM_URL && NPM_EMAIL && NPM_PASSWORD) {
     const npmConnected = await npmClient.testConnection();
     if (npmConnected) {
       console.log('✅ NPM connection successful');
+      
+      // Check if NPM auto-creation is enabled
+      if (NPM_AUTO_CREATE_DOMAIN && NPM_CERTIFICATE_ID !== undefined) {
+        // Note: Domain validation happens in CacheManager constructor
+        // Invalid domains will be rejected there with detailed error messages
+        console.log(`   NPM auto-creation: configured`);
+        console.log(`   Base domain: ${NPM_AUTO_CREATE_DOMAIN}`);
+        console.log(`   Certificate ID: ${NPM_CERTIFICATE_ID}`);
+        if (NPM_PUBLIC_ACCESS_LIST_ID) {
+          console.log(`   Public access list ID: ${NPM_PUBLIC_ACCESS_LIST_ID}`);
+        }
+        if (NPM_DEFAULT_ACCESS_LIST_ID) {
+          console.log(`   Default access list ID: ${NPM_DEFAULT_ACCESS_LIST_ID}`);
+        }
+        console.log(`   Domains will be created as: {serviceName}.${NPM_AUTO_CREATE_DOMAIN}`);
+      } else {
+        console.log('   NPM auto-creation: disabled (domain or certificate ID not provided)');
+      }
     } else {
       console.warn('⚠️  NPM connection failed - will continue without NPM integration');
       npmClient = undefined;
@@ -57,7 +81,13 @@ if (NPM_URL && NPM_EMAIL && NPM_PASSWORD) {
 
 // Initialize Dockhand client and cache
 const client = new DockhandClient(DOCKHAND_URL, DOCKHAND_USERNAME, DOCKHAND_PASSWORD);
-const cache = new CacheManager(npmClient);
+const cache = new CacheManager(
+  npmClient,
+  NPM_AUTO_CREATE_DOMAIN,
+  NPM_CERTIFICATE_ID,
+  NPM_PUBLIC_ACCESS_LIST_ID,
+  NPM_DEFAULT_ACCESS_LIST_ID
+);
 
 // Initial cache population
 console.log('📦 Populating initial cache...');

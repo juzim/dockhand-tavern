@@ -99,16 +99,27 @@ docker-compose.yaml (for your service, not dockhand-tavern or dockhand!)
 ```yaml
 
 services:
-    my-app:
+  my-app:
     image: foo
-    label:
-        dockhand-tavern.name: "My App"
-        dockhand-tavern.url: "https://myapp.example.com"
-        dockhand-tavern.icon: "plex"
-        dockhand-tavern.group: "Fun"
-        dockhand-tavern.disable: false
+    labels:
+      dockhand-tavern.name: "My App"
+      dockhand-tavern.url: "https://myapp.example.com"  # MUST be quoted!
+      dockhand-tavern.icon: "plex"
+      dockhand-tavern.group: "Fun"
+      dockhand-tavern.port: "8080"  # Override port for containers with network IP
+      dockhand-tavern.disable: "false"
        
 ```
+
+**IMPORTANT:** Always quote label values, especially URLs with ports (e.g., `"http://192.168.1.1:8080"`). Without quotes, YAML parsers may incorrectly parse the colon.
+
+**Available Labels:**
+- `dockhand-tavern.name` - Custom display name (default: container name)
+- `dockhand-tavern.url` - Custom URL (overrides automatic URL generation)
+- `dockhand-tavern.icon` - Icon name from [selfh.st/icons](https://selfh.st/icons) or full URL
+- `dockhand-tavern.group` - Group name for organizing containers
+- `dockhand-tavern.port` - Custom port for containers on dhcp-ext network (when no exposed ports)
+- `dockhand-tavern.disable` - Set to `true` to hide container from dashboard
 
 
 ## Deployment

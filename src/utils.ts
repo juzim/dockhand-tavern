@@ -103,7 +103,7 @@ export function findNpmProxyUrl(
 
 /**
  * Build access URL for a container
- * Priority: 1) dockhand-tavern.url label, 2) NPM proxy host, 3) default http://IP:port or http://networkIP
+ * Priority: 1) dockhand-tavern.url label, 2) dockhand-tavern.port with networkIP, 3) NPM proxy host, 4) default http://IP:port
  */
 export function buildContainerUrl(
   container: DockhandContainer,
@@ -115,10 +115,17 @@ export function buildContainerUrl(
   // 1. Check for custom URL label (highest priority)
   const customUrl = container.labels?.['dockhand-tavern.url'];
   if (customUrl) {
+    console.log(`[DEBUG] Container ${container.name} has custom URL label: "${customUrl}"`);
     return customUrl;
   }
 
-  // 2. If we have a port, check NPM proxy hosts for match
+  // 2. Check for custom port label with network IP (second priority)
+  const customPort = container.labels?.['dockhand-tavern.port'];
+  if (customPort && networkIp) {
+    return `http://${networkIp}:${customPort}`;
+  }
+
+  // 3. If we have an exposed port, check NPM proxy hosts for match
   if (firstPort && npmProxyHosts && npmProxyHosts.length > 0) {
     const npmUrl = findNpmProxyUrl(envPublicIp, firstPort, npmProxyHosts);
     if (npmUrl) {
@@ -126,16 +133,12 @@ export function buildContainerUrl(
     }
   }
 
-  // 3. Build URL based on what's available
+  // 4. Build URL based on what's available
   if (firstPort) {
     // Has exposed port: use environment public IP with port
     return `http://${envPublicIp}:${firstPort}`;
   } else if (networkIp) {
-    // No exposed port but has network IP: use network IP with custom port or default 80
-    const customPort = container.labels?.['dockhand-tavern.port'];
-    if (customPort) {
-      return `http://${networkIp}:${customPort}`;
-    }
+    // No exposed port but has network IP: use network IP (default port 80)
     return `http://${networkIp}`;
   }
   
@@ -188,6 +191,13 @@ export function processContainer(
   environment: DockhandEnvironment,
   npmProxyHosts?: NpmProxyHost[]
 ): ProcessedContainer | null {
+  // Debug: Log all dockhand-tavern labels
+  const tavernLabels = Object.entries(container.labels || {})
+    .filter(([key]) => key.startsWith('dockhand-tavern.'));
+  if (tavernLabels.length > 0) {
+    console.log(`[DEBUG] Container ${container.name} labels:`, Object.fromEntries(tavernLabels));
+  }
+
   // Check if container is disabled via label
   const isDisabled = container.labels?.['dockhand-tavern.disable'];
   if (isDisabled === 'true' || isDisabled === '1') {

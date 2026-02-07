@@ -9,6 +9,7 @@ import { NpmClient } from './npm-client';
 import { PeekapingClient } from './peekaping-client';
 import { CacheManager } from './cache';
 import { renderDashboard } from './template';
+import { logger } from './logger';
 
 // Environment variables
 const DOCKHAND_URL = process.env.DOCKHAND_URL || 'http://192.168.178.156:3000';
@@ -47,87 +48,85 @@ const PEEKAPING_DEFAULT_MAX_RETRIES = process.env.PEEKAPING_DEFAULT_MAX_RETRIES
 
 // Validate configuration
 if (!DOCKHAND_PASSWORD) {
-  console.error('❌ DOCKHAND_PASSWORD environment variable is required!');
+  logger.error('[Server] DOCKHAND_PASSWORD environment variable is required!');
   process.exit(1);
 }
 
-console.log('🍺 Starting Dockhand Tavern...');
-console.log(`   Dockhand URL: ${DOCKHAND_URL}`);
-console.log(`   Username: ${DOCKHAND_USERNAME}`);
-console.log(`   Port: ${PORT}`);
+logger.info('[Server] Starting Dockhand Tavern');
+logger.info(`[Server]   Dockhand URL: ${DOCKHAND_URL}`);
+logger.info(`[Server]   Username: ${DOCKHAND_USERNAME}`);
+logger.info(`[Server]   Port: ${PORT}`);
 
 // Initialize NPM client if credentials provided
 let npmClient: NpmClient | undefined;
 if (NPM_URL && NPM_EMAIL && NPM_PASSWORD) {
-  console.log(`   NPM URL: ${NPM_URL}`);
-  console.log(`   NPM Email: ${NPM_EMAIL}`);
+  logger.info(`[NPM]   URL: ${NPM_URL}`);
+  logger.info(`[NPM]   Email: ${NPM_EMAIL}`);
   npmClient = new NpmClient(NPM_URL, NPM_EMAIL, NPM_PASSWORD);
   
   // Test NPM connection
   try {
     const npmConnected = await npmClient.testConnection();
     if (npmConnected) {
-      console.log('✅ NPM connection successful');
+      logger.info('[NPM] Connection successful');
       
       // Check if NPM auto-creation is enabled
       if (NPM_AUTO_CREATE_DOMAIN && NPM_CERTIFICATE_ID !== undefined) {
         // Note: Domain validation happens in CacheManager constructor
         // Invalid domains will be rejected there with detailed error messages
-        console.log(`   NPM auto-creation: configured`);
-        console.log(`   Base domain: ${NPM_AUTO_CREATE_DOMAIN}`);
-        console.log(`   Certificate ID: ${NPM_CERTIFICATE_ID}`);
+        logger.info('[NPM]   Auto-creation enabled');
+        logger.info(`[NPM]   Base domain: ${NPM_AUTO_CREATE_DOMAIN}`);
+        logger.info(`[NPM]   Certificate ID: ${NPM_CERTIFICATE_ID}`);
         if (NPM_PUBLIC_ACCESS_LIST_ID) {
-          console.log(`   Public access list ID: ${NPM_PUBLIC_ACCESS_LIST_ID}`);
+          logger.info(`[NPM]   Public access list ID: ${NPM_PUBLIC_ACCESS_LIST_ID}`);
         }
         if (NPM_DEFAULT_ACCESS_LIST_ID) {
-          console.log(`   Default access list ID: ${NPM_DEFAULT_ACCESS_LIST_ID}`);
+          logger.info(`[NPM]   Default access list ID: ${NPM_DEFAULT_ACCESS_LIST_ID}`);
         }
-        console.log(`   Domains will be created as: {serviceName}.${NPM_AUTO_CREATE_DOMAIN}`);
+        logger.info(`[NPM]   Domain format: {serviceName}.${NPM_AUTO_CREATE_DOMAIN}`);
       } else {
-        console.log('   NPM auto-creation: disabled (domain or certificate ID not provided)');
+        logger.info('[NPM]   Auto-creation disabled (domain or certificate ID not provided)');
       }
     } else {
-      console.warn('⚠️  NPM connection failed - will continue without NPM integration');
+      logger.warn('[NPM] Connection failed - will continue without NPM integration');
       npmClient = undefined;
     }
   } catch (error) {
-    console.warn('⚠️  NPM connection test failed:', error);
+    logger.warn('[NPM] Connection test failed:', error);
     npmClient = undefined;
   }
 } else {
-  console.log('   NPM integration: disabled (credentials not provided)');
+  logger.info('[NPM] Integration disabled (credentials not provided)');
 }
 
 // Initialize Peekaping client if credentials provided
 let peekapingClient: PeekapingClient | undefined;
 if (PEEKAPING_URL && PEEKAPING_API_KEY) {
-  console.log(`   Peekaping URL: ${PEEKAPING_URL}`);
+  logger.info(`[Peekaping]   URL: ${PEEKAPING_URL}`);
   peekapingClient = new PeekapingClient(PEEKAPING_URL, PEEKAPING_API_KEY);
   
   // Test Peekaping connection
   try {
     const peekapingConnected = await peekapingClient.testConnection();
     if (peekapingConnected) {
-      console.log('✅ Peekaping connection successful');
+      logger.info('[Peekaping] Connection successful');
       
       if (PEEKAPING_NOTIFICATION_IDS.length > 0) {
-        console.log(`   Notification IDs: ${PEEKAPING_NOTIFICATION_IDS.join(', ')}`);
+        logger.info(`[Peekaping]   Notification IDs: ${PEEKAPING_NOTIFICATION_IDS.join(', ')}`);
       } else {
-        console.log(`   Notification IDs: none (monitors will have no notifications)`);
+        logger.info('[Peekaping]   Notification IDs: none (monitors will have no notifications)');
       }
-      console.log(`   Default interval: ${PEEKAPING_DEFAULT_INTERVAL}s`);
-      console.log(`   Default timeout: ${PEEKAPING_DEFAULT_TIMEOUT}s`);
-      console.log(`   Default max retries: ${PEEKAPING_DEFAULT_MAX_RETRIES}`);
+      logger.info(`[Peekaping]   Monitoring: ${PEEKAPING_DEFAULT_INTERVAL}s interval, ${PEEKAPING_DEFAULT_TIMEOUT}s timeout, ${PEEKAPING_DEFAULT_MAX_RETRIES} retries`);
     } else {
-      console.warn('⚠️  Peekaping connection failed - will continue without Peekaping integration');
+      logger.warn('[Peekaping] Connection failed - will continue without Peekaping integration');
       peekapingClient = undefined;
     }
   } catch (error) {
-    console.warn('⚠️  Peekaping connection test failed:', error);
+    logger.warn('[Peekaping] Connection test failed:', error);
     peekapingClient = undefined;
   }
 } else {
-  console.log('   Peekaping integration: disabled (credentials not provided)');
+  logger.info('[Peekaping] Integration disabled (credentials not provided)');
 }
 
 // Initialize Dockhand client and cache
@@ -146,9 +145,10 @@ const cache = new CacheManager(
 );
 
 // Initial cache population
-console.log('📦 Populating initial cache...');
+logger.info('[Cache] Populating initial cache...');
 await cache.refreshImmediate(client);
-console.log('✅ Initial cache populated');
+const stats = cache.getStats();
+logger.info(`[Cache] Initial cache populated (${stats.totalContainers} containers, ${stats.totalEnvironments} environments)`);
 
 // Create Elysia app
 const app = new Elysia()
@@ -175,11 +175,12 @@ const app = new Elysia()
 
   // Webhook endpoint (non-blocking) - accepts both GET and POST
   .post('/webhook', async ({ body }) => {
-    console.log('📨 Webhook received (POST):', body);
+    logger.info('[Webhook] Received POST request');
+    logger.debug('[Webhook]   Body:', body);
 
     // Trigger debounced cache refresh (non-blocking)
     cache.refresh(client).catch((error) => {
-      console.error('❌ Webhook cache refresh failed:', error);
+      logger.error('[Webhook] Cache refresh failed:', error);
     });
 
     // Respond immediately
@@ -187,11 +188,11 @@ const app = new Elysia()
   })
 
   .get('/webhook', async () => {
-    console.log('📨 Webhook received (GET)');
+    logger.info('[Webhook] Received GET request');
 
     // Trigger debounced cache refresh (non-blocking)
     cache.refresh(client).catch((error) => {
-      console.error('❌ Webhook cache refresh failed:', error);
+      logger.error('[Webhook] Cache refresh failed:', error);
     });
 
     // Respond immediately
@@ -224,7 +225,7 @@ const app = new Elysia()
       });
     }
 
-    console.error('Server error:', error);
+    logger.error('[Server] Server error:', error);
     return new Response('500 - Internal Server Error', {
       status: 500,
       headers: { 'Content-Type': 'text/plain' },
@@ -234,11 +235,7 @@ const app = new Elysia()
   // Start server
   .listen(PORT);
 
-console.log(`\n✅ Dockhand Tavern is running!`);
-console.log(`   Dashboard: http://localhost:${PORT}`);
-console.log(`   Health: http://localhost:${PORT}/health`);
-console.log(`   Webhook: http://localhost:${PORT}/webhook (GET or POST)`);
-console.log(`\n📊 Cache stats:`, cache.getStats());
-console.log(`\n💡 Tip: Set this as your browser's new tab page!`);
-console.log(`\n🔄 The dashboard will auto-update via webhooks from Dockhand.`);
-console.log(`   Configure webhook in Dockhand: http://<this-server>:${PORT}/webhook\n`);
+logger.info(`[Server] Dockhand Tavern is running at http://localhost:${PORT}`);
+logger.info(`[Server]   Dashboard: http://localhost:${PORT}`);
+logger.info(`[Server]   Health: http://localhost:${PORT}/health`);
+logger.info(`[Server]   Webhook: http://localhost:${PORT}/webhook (GET or POST)`);

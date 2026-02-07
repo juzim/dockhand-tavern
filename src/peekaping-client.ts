@@ -10,6 +10,7 @@ import type {
   PeekapingCreateTagRequest,
   PeekapingApiResponse 
 } from './peekaping-types';
+import { logger } from './logger';
 
 export class PeekapingClient {
   private baseUrl: string;
@@ -44,7 +45,7 @@ export class PeekapingClient {
       
       return data.data;
     } catch (error) {
-      console.error(`Peekaping API request error (${path}):`, error);
+      logger.error(`[Peekaping] API request error (${path}):`, error);
       throw error;
     }
   }
@@ -70,7 +71,7 @@ export class PeekapingClient {
       const data: PeekapingApiResponse<T> = await response.json();
       return data.data;
     } catch (error) {
-      console.error(`Peekaping API POST request error (${path}):`, error);
+      logger.error(`[Peekaping] API POST request error (${path}):`, error);
       throw error;
     }
   }

@@ -10,6 +10,7 @@ import type {
   FilterOptions,
   NpmProxyHost,
 } from './types';
+import { logger } from './logger';
 
 /**
  * Extract unique ports from container ports array
@@ -21,7 +22,7 @@ export function extractPorts(ports: DockhandPort[]): number[] {
   for (const port of ports) {
     // Skip ports without proper host exposure (not published to host)
     if (!port.PublicPort || !port.IP) {
-      console.debug(`Skipping port without PublicPort or IP:`, port);
+      logger.debug('[Utils] Skipping port without PublicPort or IP:', port);
       continue;
     }
     
@@ -59,7 +60,7 @@ export function extractNetworkIp(networks: Record<string, { ipAddress: string }>
     return null;
   }
   
-  console.debug(`Found dhcp-ext network IP:`, ip);
+  logger.debug('[Utils] Found dhcp-ext network IP:', ip);
   return ip;
 }
 
@@ -121,13 +122,13 @@ export function buildContainerUrl(
   // 1. Check for custom URL label (highest priority)
   const customUrl = container.labels?.['dockhand-tavern.url'];
   if (customUrl) {
-    console.log(`[DEBUG] Container ${container.name} has custom URL label: "${customUrl}"`);
+    logger.debug(`[Utils] Container ${container.name} has custom URL label: "${customUrl}"`);
     return customUrl;
   }
 
   // 2. Check for auto-created NPM domain (second priority)
   if (autoCreatedDomain) {
-    console.log(`[DEBUG] Container ${container.name} using auto-created domain: https://${autoCreatedDomain}`);
+    logger.debug(`[Utils] Container ${container.name} using auto-created domain: https://${autoCreatedDomain}`);
     return `https://${autoCreatedDomain}`;
   }
 
@@ -208,7 +209,7 @@ export function processContainer(
   const tavernLabels = Object.entries(container.labels || {})
     .filter(([key]) => key.startsWith('dockhand-tavern.'));
   if (tavernLabels.length > 0) {
-    console.log(`[DEBUG] Container ${container.name} labels:`, Object.fromEntries(tavernLabels));
+    logger.debug(`[Utils] Container ${container.name} labels:`, Object.fromEntries(tavernLabels));
   }
 
   // Check disable labels with proper precedence
@@ -233,7 +234,7 @@ export function processContainer(
 
   // Skip containers with no exposed ports AND no network IP
   if (ports.length === 0 && !networkIp) {
-    console.debug(`Skipping container ${container.name}: no exposed ports or network IP`);
+    logger.debug(`[Utils] Skipping container ${container.name}: no exposed ports or network IP`);
     return null;
   }
 
@@ -646,7 +647,7 @@ export function parseBookmarks(): ProcessedContainer[] {
     const bookmarksArray = JSON.parse(bookmarksEnv);
     
     if (!Array.isArray(bookmarksArray)) {
-      console.warn('⚠️  BOOKMARKS must be a JSON array');
+      logger.warn('[Utils] BOOKMARKS must be a JSON array');
       return [];
     }
     
@@ -654,7 +655,7 @@ export function parseBookmarks(): ProcessedContainer[] {
     
     for (const bookmark of bookmarksArray) {
       if (!bookmark.name || !bookmark.url) {
-        console.warn('⚠️  Skipping invalid bookmark (missing name or url):', bookmark);
+        logger.warn('[Utils] Skipping invalid bookmark (missing name or url):', bookmark);
         continue;
       }
       
@@ -662,18 +663,18 @@ export function parseBookmarks(): ProcessedContainer[] {
         const processedBookmark = processBookmark(bookmark);
         processed.push(processedBookmark);
       } catch (error) {
-        console.warn('⚠️  Failed to process bookmark:', bookmark, error);
+        logger.warn('[Utils] Failed to process bookmark:', bookmark, error);
       }
     }
     
     if (processed.length > 0) {
-      console.log(`✅ Loaded ${processed.length} bookmark(s)`);
+      logger.info(`[Utils] Loaded ${processed.length} bookmark(s)`);
     }
     
     return processed;
     
   } catch (error) {
-    console.error('❌ Failed to parse BOOKMARKS environment variable:', error);
+    logger.error('[Utils] Failed to parse BOOKMARKS environment variable:', error);
     return [];
   }
 }

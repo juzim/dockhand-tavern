@@ -4,6 +4,7 @@
  */
 
 import type { NpmProxyHost, NpmAuthResponse, NpmCreateProxyHostRequest, NpmCertificate } from './npm-types';
+import { logger } from './logger';
 
 export class NpmClient {
   private baseUrl: string;
@@ -40,7 +41,7 @@ export class NpmClient {
       const data: NpmAuthResponse = await response.json();
       this.token = data.token;
     } catch (error) {
-      console.error('NPM authentication error:', error);
+      logger.error('[NPM] Authentication error:', error);
       throw error;
     }
   }
@@ -91,7 +92,7 @@ export class NpmClient {
 
       return response.json();
     } catch (error) {
-      console.error(`NPM API request error (${path}):`, error);
+      logger.error(`[NPM] API request error (${path}):`, error);
       throw error;
     }
   }
@@ -139,7 +140,7 @@ export class NpmClient {
 
       return response.json();
     } catch (error) {
-      console.error(`NPM API POST request error (${path}):`, error);
+      logger.error(`[NPM] API POST request error (${path}):`, error);
       throw error;
     }
   }

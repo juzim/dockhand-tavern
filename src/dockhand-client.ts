@@ -4,6 +4,7 @@
  */
 
 import type { DockhandEnvironment, DockhandContainer } from './types';
+import { logger } from './logger';
 
 export class DockhandClient {
   private baseUrl: string;
@@ -45,7 +46,7 @@ export class DockhandClient {
         throw new Error('No session cookie received from Dockhand');
       }
     } catch (error) {
-      console.error('Dockhand authentication error:', error);
+      logger.error('[Dockhand] Authentication error:', error);
       throw error;
     }
   }
@@ -96,7 +97,7 @@ export class DockhandClient {
 
       return response.json();
     } catch (error) {
-      console.error(`Dockhand API request error (${path}):`, error);
+      logger.error(`[Dockhand] API request error (${path}):`, error);
       throw error;
     }
   }

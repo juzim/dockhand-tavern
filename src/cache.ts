@@ -10,6 +10,7 @@ import { processContainer, parseBookmarks, buildDomainName, findProxyHostByDomai
 import { extractPorts } from './utils';
 import type { CacheData, ProcessedContainer, NpmProxyHost, DockhandContainer, DockhandEnvironment, PeekapingMonitor, PeekapingCreateMonitorRequest, PeekapingTag } from './types';
 import type { NpmCreateProxyHostRequest, NpmCertificate } from './npm-types';
+import { logger } from './logger';
 
 export class CacheManager {
   private data: CacheData = {
@@ -74,9 +75,9 @@ export class CacheManager {
     if (npmAutoCreateDomain && npmCertificateId !== undefined && npmCertificateId !== null) {
       // Validate base domain format
       if (!validateBaseDomain(npmAutoCreateDomain)) {
-        console.error(`❌ Invalid NPM_AUTO_CREATE_DOMAIN: "${npmAutoCreateDomain}"`);
-        console.error(`   Domain format is invalid (cannot contain wildcards, must be valid DNS name)`);
-        console.error(`   NPM auto-creation disabled`);
+        logger.error(`[NPM] Invalid NPM_AUTO_CREATE_DOMAIN: "${npmAutoCreateDomain}"`);
+        logger.error('[NPM]   Domain format is invalid (cannot contain wildcards, must be valid DNS name)');
+        logger.error('[NPM]   NPM auto-creation disabled');
         this.npmAutoCreateDomain = null;
         this.npmCertificateId = null;
         return;
@@ -89,8 +90,8 @@ export class CacheManager {
       // Fetch certificate details asynchronously (don't block constructor)
       if (this.npmClient) {
         this.fetchCertificateDetails().catch(error => {
-          console.error(`⚠️  Failed to fetch certificate details:`, error);
-          console.error(`   Certificate domain validation will be skipped`);
+          logger.error('[NPM] Failed to fetch certificate details:', error);
+          logger.error('[NPM]   Certificate domain validation will be skipped');
         });
       }
     } else {
@@ -109,24 +110,24 @@ export class CacheManager {
     }
 
     try {
-      console.log(`📜 Fetching certificate ID ${this.npmCertificateId} details...`);
+      logger.debug(`[NPM] Fetching certificate ID ${this.npmCertificateId} details...`);
       const certificate = await this.npmClient.fetchCertificate(this.npmCertificateId);
       
       this.npmCertificateDomains = certificate.domain_names || [];
       
-      console.log(`✅ Certificate covers domains: ${this.npmCertificateDomains.join(', ')}`);
+      logger.debug(`[NPM] Certificate covers domains: ${this.npmCertificateDomains.join(', ')}`);
       
       // Check if certificate has expired
       const expiresOn = new Date(certificate.expires_on);
       const now = new Date();
       if (expiresOn < now) {
-        console.warn(`⚠️  WARNING: Certificate ID ${this.npmCertificateId} has expired on ${certificate.expires_on}`);
-        console.warn(`   Auto-created proxy hosts may not work correctly`);
+        logger.warn(`[NPM] WARNING: Certificate ID ${this.npmCertificateId} has expired on ${certificate.expires_on}`);
+        logger.warn('[NPM]   Auto-created proxy hosts may not work correctly');
       }
     } catch (error) {
-      console.error(`❌ Failed to fetch certificate ID ${this.npmCertificateId}:`, error);
-      console.error(`   Certificate may not exist or NPM connection failed`);
-      console.error(`   Domain validation will be skipped`);
+      logger.error(`[NPM] Failed to fetch certificate ID ${this.npmCertificateId}:`, error);
+      logger.error('[NPM]   Certificate may not exist or NPM connection failed');
+      logger.error('[NPM]   Domain validation will be skipped');
     }
   }
 
@@ -143,7 +144,7 @@ export class CacheManager {
       return; // Auto-creation not configured
     }
 
-    console.log('🔍 Checking for NPM proxy hosts to auto-create...');
+    logger.debug('[NPM] Checking for proxy hosts to auto-create...');
 
     let createdCount = 0;
     let skippedCount = 0;
@@ -152,7 +153,7 @@ export class CacheManager {
       // CRITICAL: Only process running containers - skip all other states
       // Docker states: running, exited, paused, restarting, removing, dead, created
       if (container.state !== 'running') {
-        console.debug(`Skipping NPM creation for "${container.name}" (state: ${container.state})`);
+        logger.debug(`[NPM] Skipping "${container.name}" (state: ${container.state})`);
         continue;
       }
 
@@ -164,7 +165,7 @@ export class CacheManager {
 
       // Priority 2: Proxy-specific disable
       if (container.labels?.['dockhand-tavern.disable-proxy'] === 'true') {
-        console.log(`ℹ️  Skipping NPM proxy creation for "${container.name}" (disable-proxy label set)`);
+        logger.debug(`[NPM] Skipping "${container.name}" (disable-proxy label set)`);
         skippedCount++;
         continue;
       }
@@ -196,9 +197,8 @@ export class CacheManager {
             skipReason = 'IP addresses are not supported';
           }
           
-          console.log(`ℹ️  Skipping NPM creation for container "${container.name}"`);
-          console.log(`   Custom URL: ${customUrl}`);
-          console.log(`   Reason: ${skipReason}`);
+          logger.debug(`[NPM] Skipping "${container.name}": ${skipReason}`);
+          logger.debug(`[NPM]   Custom URL: ${customUrl}`);
           continue;
         }
         
@@ -231,31 +231,16 @@ export class CacheManager {
 
       // Validate generated/extracted domain format
       if (!validateGeneratedDomain(domain)) {
-        console.warn(`⚠️  Skipping NPM creation for container "${container.name}"`);
-        console.warn(`   Domain "${domain}" is invalid`);
-        console.warn(`   Domain contains invalid characters or format`);
+        logger.warn(`[NPM] Skipping "${container.name}": Invalid domain "${domain}"`);
+        logger.warn('[NPM]   Domain contains invalid characters or format');
         continue;
       }
 
       // Check if domain is covered by certificate (if certificate domains are cached)
       if (this.npmCertificateDomains.length > 0) {
         if (!isDomainCoveredByCertificate(domain, this.npmCertificateDomains)) {
-          console.warn(`⚠️  Skipping NPM creation for container "${container.name}"`);
-          console.warn(`   Generated domain "${domain}" is not covered by certificate ID ${this.npmCertificateId}`);
-          console.warn(`   Certificate covers: [${this.npmCertificateDomains.join(', ')}]`);
-          
-          // Provide helpful suggestion for wildcard certificates
-          const wildcardCert = this.npmCertificateDomains.find(d => d.startsWith('*.'));
-          if (wildcardCert) {
-            const baseDomain = wildcardCert.substring(2);
-            if (domain.endsWith('.' + baseDomain)) {
-              console.warn(`   Hint: Domain structure looks correct for wildcard ${wildcardCert}`);
-              console.warn(`   Check that service name "${serviceName}" doesn't contain dots or invalid chars`);
-            } else {
-              console.warn(`   Hint: Consider using base domain "${baseDomain}" instead of "${this.npmAutoCreateDomain}"`);
-            }
-          }
-          
+          logger.warn(`[NPM] Skipping "${container.name}": Domain "${domain}" not covered by certificate ID ${this.npmCertificateId}`);
+          logger.warn(`[NPM]   Certificate covers: [${this.npmCertificateDomains.join(', ')}]`);
           continue;
         }
       }
@@ -273,11 +258,10 @@ export class CacheManager {
           const expectedPort = firstPort;
 
           if (existingHost.forward_host !== expectedHost || existingHost.forward_port !== expectedPort) {
-            console.log(`⚠️  Domain mismatch detected:`);
-            console.log(`   Domain: ${domain}`);
-            console.log(`   Current target: ${existingHost.forward_host}:${existingHost.forward_port}`);
-            console.log(`   Expected target: ${expectedHost}:${expectedPort}`);
-            console.log(`   (Skipping - not auto-updating existing entries)`);
+            logger.warn(`[NPM] Domain mismatch detected for ${domain}`);
+            logger.warn(`[NPM]   Current target: ${existingHost.forward_host}:${existingHost.forward_port}`);
+            logger.warn(`[NPM]   Expected target: ${expectedHost}:${expectedPort}`);
+            logger.warn('[NPM]   Skipping - not auto-updating existing entries');
           }
         }
 
@@ -291,7 +275,7 @@ export class CacheManager {
       const firstPort = ports.length > 0 ? ports[0] : null;
 
       if (!firstPort) {
-        console.log(`⚠️  Container ${container.name} has no exposed ports, skipping NPM creation`);
+        logger.debug(`[NPM] Skipping "${container.name}": No exposed ports`);
         continue;
       }
 
@@ -324,33 +308,20 @@ export class CacheManager {
       };
 
       try {
-        // Log appropriate message based on domain source
-        if (domainSource === 'custom-url') {
-          console.log(`📡 Creating NPM proxy host from custom URL`);
-          console.log(`   Container: ${container.name}`);
-          console.log(`   Custom URL: ${customUrl}`);
-          console.log(`   Extracted domain: ${domain}`);
-        } else if (domainSource === 'custom-name') {
-          console.log(`📡 Creating NPM proxy host from custom name`);
-          console.log(`   Container: ${container.name}`);
-          console.log(`   Custom name: "${container.labels?.['dockhand-tavern.name']}"`);
-          console.log(`   Generated domain: ${domain}`);
-        } else if (domainSource === 'service') {
-          console.log(`📡 Creating NPM proxy host (auto-generated)`);
-          console.log(`   Container: ${container.name}`);
-          console.log(`   Service: ${container.labels?.['com.docker.compose.service']}`);
-          console.log(`   Generated domain: ${domain}`);
-        } else {
-          console.log(`📡 Creating NPM proxy host (auto-generated)`);
-          console.log(`   Container: ${container.name}`);
-          console.log(`   Generated domain: ${domain}`);
-        }
+        // Determine service name for logging
+        const serviceName = 
+          container.labels?.['dockhand-tavern.name'] || 
+          container.labels?.['com.docker.compose.service'] || 
+          container.name;
         
-        console.log(`   Target: ${env.publicIp}:${firstPort}`);
-        console.log(`   Access list: ${accessListId || 'none (public)'}`);
+        // Log creation with all context
+        logger.info(`[NPM] Creating proxy host for service "${serviceName}" (container: ${container.name})`);
+        logger.info(`[NPM]   Environment: ${env.name} (${env.publicIp})`);
+        logger.info(`[NPM]   Domain: ${domain} -> ${env.publicIp}:${firstPort}`);
+        logger.info(`[NPM]   Access: ${accessListId ? `list ID ${accessListId}` : 'public (no access list)'}`);
         
         const createdHost = await this.npmClient.createProxyHost(proxyHostRequest);
-        console.log(`✅ Created NPM proxy host: ${domain} (ID: ${createdHost.id})`);
+        logger.info(`[NPM] Successfully created proxy host (ID: ${createdHost.id})`);
         createdCount++;
 
         // Track the auto-created domain for this container
@@ -358,21 +329,21 @@ export class CacheManager {
         
         // Add warning if custom URL also exists (conflict scenario)
         if (customUrl && domainSource === 'custom-url') {
-          console.warn(`⚠️  Note: Container "${container.name}" has custom URL label`);
-          console.warn(`   Created NPM entry: https://${domain}`);
-          console.warn(`   Custom URL label: ${customUrl}`);
-          console.warn(`   Frontend card will display: ${customUrl} (custom URL takes priority)`);
+          logger.warn(`[NPM] Note: Container "${container.name}" has custom URL label`);
+          logger.warn(`[NPM]   Created NPM entry: https://${domain}`);
+          logger.warn(`[NPM]   Custom URL label: ${customUrl}`);
+          logger.warn('[NPM]   Frontend card will display: ${customUrl} (custom URL takes priority)');
         }
 
         // Add to npmProxyHosts array so subsequent checks see it
         npmProxyHosts.push(createdHost);
       } catch (error) {
-        console.error(`❌ Failed to create NPM proxy host for ${domain}:`, error);
+        logger.error(`[NPM] Failed to create proxy host for ${domain}:`, error);
       }
     }
 
     if (createdCount > 0 || skippedCount > 0) {
-      console.log(`✅ NPM auto-creation complete: ${createdCount} created, ${skippedCount} skipped`);
+      logger.info(`[NPM] Auto-creation complete: ${createdCount} created, ${skippedCount} skipped`);
     }
   }
 
@@ -391,9 +362,9 @@ export class CacheManager {
       
       // Log if colors differ
       if (cached.color !== color) {
-        console.warn(`⚠️  Tag "${name}" exists with different color`);
-        console.warn(`   Expected: ${color}, Found: ${cached.color}`);
-        console.warn(`   Using existing tag (not updating)`);
+        logger.warn(`[Peekaping] Tag "${name}" exists with different color`);
+        logger.warn(`[Peekaping]   Expected: ${color}, Found: ${cached.color}`);
+        logger.warn('[Peekaping]   Using existing tag (not updating)');
       }
       
       return cached.id;
@@ -408,10 +379,10 @@ export class CacheManager {
       });
       
       this.tagCache.set(name, tag);
-      console.log(`✅ Created tag: "${name}" (${color})`);
+      logger.debug(`[Peekaping] Created tag: "${name}" (${color})`);
       return tag.id;
     } catch (error) {
-      console.error(`❌ Failed to create tag "${name}":`, error);
+      logger.error(`[Peekaping] Failed to create tag "${name}":`, error);
       throw error;
     }
   }
@@ -462,7 +433,7 @@ export class CacheManager {
       return; // Peekaping not configured
     }
 
-    console.log('🔍 Checking for Peekaping monitors to auto-create...');
+    logger.debug('[Peekaping] Checking for monitors to auto-create...');
 
     let createdCount = 0;
     let skippedCount = 0;
@@ -472,9 +443,9 @@ export class CacheManager {
     try {
       const tags = await this.peekapingClient.fetchTags();
       tags.forEach(tag => this.tagCache.set(tag.name, tag));
-      console.log(`✅ Loaded ${tags.length} existing Peekaping tag(s)`);
+      logger.debug(`[Peekaping] Loaded ${tags.length} existing tag(s)`);
     } catch (error) {
-      console.error('⚠️  Failed to fetch Peekaping tags:', error);
+      logger.error('[Peekaping] Failed to fetch tags:', error);
       // Continue - we'll create tags as needed
     }
 
@@ -482,9 +453,9 @@ export class CacheManager {
     let existingMonitors: PeekapingMonitor[] = [];
     try {
       existingMonitors = await this.peekapingClient.fetchMonitors();
-      console.log(`✅ Fetched ${existingMonitors.length} existing Peekaping monitor(s)`);
+      logger.debug(`[Peekaping] Fetched ${existingMonitors.length} existing monitor(s)`);
     } catch (error) {
-      console.error('⚠️  Failed to fetch Peekaping monitors:', error);
+      logger.error('[Peekaping] Failed to fetch monitors:', error);
       return; // Can't proceed without knowing what monitors exist
     }
 
@@ -492,7 +463,7 @@ export class CacheManager {
       // CRITICAL: Only process running containers - skip all other states
       // Docker states: running, exited, paused, restarting, removing, dead, created
       if (container.state !== 'running') {
-        console.debug(`Skipping monitor creation for "${container.name}" (state: ${container.state})`);
+        logger.debug(`[Peekaping] Skipping "${container.name}" (state: ${container.state})`);
         continue;
       }
 
@@ -509,7 +480,7 @@ export class CacheManager {
         container.labels?.['dockhand-tavern.monitor-disable'] === 'true';
       
       if (monitoringDisabled) {
-        console.log(`ℹ️  Skipping monitor creation for "${container.name}" (disable-monitoring label set)`);
+        logger.debug(`[Peekaping] Skipping "${container.name}" (disable-monitoring label set)`);
         continue;
       }
 
@@ -536,7 +507,7 @@ export class CacheManager {
       else {
         const ports = extractPorts(container.ports);
         if (ports.length === 0) {
-          console.log(`ℹ️  Skipping monitor creation for "${container.name}" (no exposed ports)`);
+          logger.debug(`[Peekaping] Skipping "${container.name}" (no exposed ports)`);
           continue;
         }
         protocol = 'http';
@@ -585,7 +556,7 @@ export class CacheManager {
           matchReason = 'name matches';
         }
         
-        console.log(`ℹ️  Monitor "${displayName}" already exists (${matchReason}, ID: ${existingMonitor.id})`);
+        logger.debug(`[Peekaping] Monitor "${displayName}" already exists (${matchReason}, ID: ${existingMonitor.id})`);
         skippedCount++;
         
         // Track the existing monitor for this container
@@ -595,23 +566,27 @@ export class CacheManager {
 
       // Collect tag IDs for this monitor
       const tagIds: string[] = [];
+      const tagNames: string[] = [];
       try {
         // 1. Environment tag (always)
         const envTagId = await this.ensureEnvironmentTag(env.name);
         tagIds.push(envTagId);
+        tagNames.push(`env:${env.name}`);
         
         // 2. Group tag (only if label exists)
         const groupLabel = container.labels?.['dockhand-tavern.group'];
         if (groupLabel) {
           const groupTagId = await this.ensureGroupTag(groupLabel);
           tagIds.push(groupTagId);
+          tagNames.push(`group:${groupLabel}`);
         }
         
         // 3. Dockhand-tavern tag (always)
         const dockhandTagId = await this.ensureDockhandTag();
         tagIds.push(dockhandTagId);
+        tagNames.push(this.DOCKHAND_TAG);
       } catch (error) {
-        console.error(`⚠️  Failed to prepare tags for "${displayName}":`, error);
+        logger.error(`[Peekaping] Failed to prepare tags for "${displayName}":`, error);
         // Continue without tags rather than failing entirely
       }
 
@@ -641,15 +616,16 @@ export class CacheManager {
       };
 
       try {
-        console.log(`📊 Creating Peekaping monitor`);
-        console.log(`   Container: ${container.name}`);
-        console.log(`   Monitor name: ${displayName}`);
-        console.log(`   URL: ${monitorUrl} (${urlSource})`);
-        console.log(`   Protocol: ${protocol}`);
-        console.log(`   Interval: ${this.peekapingDefaultInterval}s`);
+        logger.info(`[Peekaping] Creating monitor for service "${displayName}" (container: ${container.name})`);
+        logger.info(`[Peekaping]   Environment: ${env.name}`);
+        logger.info(`[Peekaping]   URL: ${monitorUrl} (${urlSource})`);
+        logger.info(`[Peekaping]   Interval: ${this.peekapingDefaultInterval}s, Timeout: ${this.peekapingDefaultTimeout}s`);
+        if (tagNames.length > 0) {
+          logger.info(`[Peekaping]   Tags: ${tagNames.join(', ')}`);
+        }
 
         const createdMonitor = await this.peekapingClient.createMonitor(monitorRequest);
-        console.log(`✅ Created Peekaping monitor: ${displayName} (ID: ${createdMonitor.id})`);
+        logger.info(`[Peekaping] Successfully created monitor (ID: ${createdMonitor.id})`);
         createdCount++;
 
         // Track the auto-created monitor for this container
@@ -658,12 +634,12 @@ export class CacheManager {
         // Add to existing monitors list so subsequent checks see it
         existingMonitors.push(createdMonitor);
       } catch (error) {
-        console.error(`❌ Failed to create Peekaping monitor for ${displayName}:`, error);
+        logger.error(`[Peekaping] Failed to create monitor for ${displayName}:`, error);
       }
     }
 
     if (createdCount > 0 || skippedCount > 0) {
-      console.log(`✅ Peekaping monitor auto-creation complete: ${createdCount} created, ${skippedCount} skipped`);
+      logger.info(`[Peekaping] Auto-creation complete: ${createdCount} created, ${skippedCount} skipped`);
     }
   }
 
@@ -673,7 +649,7 @@ export class CacheManager {
    */
   private async doRefresh(client: DockhandClient): Promise<void> {
     try {
-      console.log('Refreshing cache from Dockhand...');
+      logger.debug('[Cache] Refreshing cache from Dockhand...');
 
       // Clear auto-created domains and monitors maps (will be rebuilt during this refresh)
       this.autoCreatedDomains.clear();
@@ -683,11 +659,11 @@ export class CacheManager {
       let npmProxyHosts: NpmProxyHost[] = [];
       if (this.npmClient) {
         try {
-          console.log('Fetching NPM proxy hosts...');
+          logger.debug('[Cache] Fetching NPM proxy hosts...');
           npmProxyHosts = await this.npmClient.fetchProxyHosts();
-          console.log(`✅ Fetched ${npmProxyHosts.length} NPM proxy host(s)`);
+          logger.debug(`[Cache] Fetched ${npmProxyHosts.length} NPM proxy host(s)`);
         } catch (error) {
-          console.error('⚠️  Failed to fetch NPM proxy hosts:', error);
+          logger.error('[Cache] Failed to fetch NPM proxy hosts:', error);
           // Continue without NPM data (fail silently)
         }
       }
@@ -705,7 +681,7 @@ export class CacheManager {
             allRawContainers.push({ container, env });
           }
         } catch (error) {
-          console.error(`Failed to fetch containers for env ${env.name}:`, error);
+          logger.error(`[Cache] Failed to fetch containers for env ${env.name}:`, error);
           // Continue with other environments
         }
       }
@@ -738,11 +714,11 @@ export class CacheManager {
         error: undefined,
       };
 
-      console.log(
-        `Cache refreshed: ${allContainers.length} containers from ${environments.length} environments`
+      logger.info(
+        `[Cache] Refresh complete: ${allContainers.length} containers from ${environments.length} environments`
       );
     } catch (error) {
-      console.error('Cache refresh failed:', error);
+      logger.error('[Cache] Refresh failed:', error);
 
       // Update error but keep old data
       this.data.error = error instanceof Error ? error.message : 'Unknown error';
@@ -762,13 +738,13 @@ export class CacheManager {
       clearTimeout(this.debounceTimer);
     }
 
-    console.log(`📨 Refresh request received (${this.pendingRefreshCount} pending)`);
+    logger.debug(`[Cache] Refresh request received (${this.pendingRefreshCount} pending)`);
 
     // Set new debounce timer (5 seconds)
     this.debounceTimer = setTimeout(async () => {
       // Check if already refreshing
       if (this.isRefreshing) {
-        console.log('⏳ Cache refresh already in progress, skipping...');
+        logger.debug('[Cache] Refresh already in progress, skipping...');
         this.pendingRefreshCount = 0;
         return;
       }
@@ -776,7 +752,7 @@ export class CacheManager {
       const requestCount = this.pendingRefreshCount;
       this.pendingRefreshCount = 0;
 
-      console.log(`🔄 Starting cache refresh (processed ${requestCount} queued request(s))`);
+      logger.info(`[Cache] Starting refresh (${requestCount} queued request(s))`);
 
       // Set lock
       this.isRefreshing = true;
@@ -795,7 +771,7 @@ export class CacheManager {
    */
   async refreshImmediate(client: DockhandClient): Promise<void> {
     if (this.isRefreshing) {
-      console.log('⏳ Cache refresh already in progress, skipping immediate refresh...');
+      logger.debug('[Cache] Refresh already in progress, skipping immediate refresh...');
       return;
     }
 

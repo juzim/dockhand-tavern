@@ -154,6 +154,19 @@ export class CacheManager {
         continue;
       }
 
+      // Check disable labels with proper precedence
+      // Priority 1: Master disable (overrides everything)
+      if (container.labels?.['dockhand-tavern.disable'] === 'true') {
+        continue; // Skip proxy creation
+      }
+
+      // Priority 2: Proxy-specific disable
+      if (container.labels?.['dockhand-tavern.disable-proxy'] === 'true') {
+        console.log(`ℹ️  Skipping NPM proxy creation for "${container.name}" (disable-proxy label set)`);
+        skippedCount++;
+        continue;
+      }
+
       // Determine domain based on priority:
       // 1. dockhand-tavern.url (custom URL - extract domain)
       // 2. dockhand-tavern.name (custom name - sanitize and build)
@@ -479,15 +492,20 @@ export class CacheManager {
         continue;
       }
 
-      // Skip if monitor-disable label is set
-      if (container.labels?.['dockhand-tavern.monitor-disable'] === 'true') {
-        console.log(`ℹ️  Skipping monitor creation for "${container.name}" (monitor-disable label set)`);
-        continue;
+      // Check disable labels with proper precedence
+      // Priority 1: Master disable (overrides everything)
+      if (container.labels?.['dockhand-tavern.disable'] === 'true') {
+        continue; // Skip monitor creation
       }
 
-      // Skip if dashboard-disable label is set (for backward compatibility)
-      if (container.labels?.['dockhand-tavern.disable'] === 'true') {
-        console.log(`ℹ️  Skipping monitor creation for "${container.name}" (disable label set)`);
+      // Priority 2: Monitoring-specific disable
+      // Support both old (monitor-disable) and new (disable-monitoring) labels
+      const monitoringDisabled = 
+        container.labels?.['dockhand-tavern.disable-monitoring'] === 'true' ||
+        container.labels?.['dockhand-tavern.monitor-disable'] === 'true';
+      
+      if (monitoringDisabled) {
+        console.log(`ℹ️  Skipping monitor creation for "${container.name}" (disable-monitoring label set)`);
         continue;
       }
 

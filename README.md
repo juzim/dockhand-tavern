@@ -122,13 +122,24 @@ services:
 **IMPORTANT:** Always quote label values, especially URLs with ports (e.g., `"http://192.168.1.1:8080"`). Without quotes, YAML parsers may incorrectly parse the colon.
 
 **Available Labels:**
+
+*Display & Organization:*
 - `dockhand-tavern.name` - Custom display name (default: container name)
 - `dockhand-tavern.url` - Custom URL (overrides automatic URL generation)
 - `dockhand-tavern.icon` - Icon name from [selfh.st/icons](https://selfh.st/icons) or full URL
 - `dockhand-tavern.group` - Group name for organizing containers
 - `dockhand-tavern.port` - Custom port for containers on dhcp-ext network (when no exposed ports)
+
+*NPM Proxy Configuration:*
 - `dockhand-tavern.public` - Set to `true` to use public access list in NPM (requires NPM_PUBLIC_ACCESS_LIST_ID)
-- `dockhand-tavern.disable` - Set to `true` to hide container from dashboard
+
+*Disable Controls:*
+- `dockhand-tavern.disable` - **Master disable** - Completely disables ALL features (dashboard, proxy, monitoring)
+- `dockhand-tavern.disable-dashboard` - Hide from dashboard only (proxy and monitoring still work)
+- `dockhand-tavern.disable-proxy` - Skip NPM proxy creation only (dashboard and monitoring still work)
+- `dockhand-tavern.disable-monitoring` - Skip Peekaping monitor creation only (dashboard and proxy still work)
+
+**Label Precedence:** The `disable` label overrides ALL specific `disable-*` labels. Use specific labels for granular control.
 
 ## NPM Auto-Creation
 
@@ -341,14 +352,16 @@ services:
 
 ### Labels
 
-- **`dockhand-tavern.monitor-disable: "true"`** - Skip Peekaping monitor creation for this container
+**Disable monitoring:**
+- `dockhand-tavern.disable-monitoring: "true"` - Skip Peekaping monitor creation for this container
+- `dockhand-tavern.monitor-disable: "true"` - Alias for `disable-monitoring` (both work)
 
 ```yaml
 services:
   internal-db:
     image: postgres
     labels:
-      dockhand-tavern.monitor-disable: "true"  # Don't monitor this service
+      dockhand-tavern.disable-monitoring: "true"  # Don't monitor this service
 ```
 
 ### Getting Your API Key

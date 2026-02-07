@@ -211,10 +211,15 @@ export function processContainer(
     console.log(`[DEBUG] Container ${container.name} labels:`, Object.fromEntries(tavernLabels));
   }
 
-  // Check if container is disabled via label
-  const isDisabled = container.labels?.['dockhand-tavern.disable'];
-  if (isDisabled === 'true' || isDisabled === '1') {
-    return null;
+  // Check disable labels with proper precedence
+  // Priority 1: Master disable (overrides everything)
+  if (container.labels?.['dockhand-tavern.disable'] === 'true') {
+    return null; // Completely disabled - hide from dashboard
+  }
+
+  // Priority 2: Dashboard-specific disable
+  if (container.labels?.['dockhand-tavern.disable-dashboard'] === 'true') {
+    return null; // Hide from dashboard only
   }
 
   // Only show running containers

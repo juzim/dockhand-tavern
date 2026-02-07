@@ -5,9 +5,10 @@
 
 import { DockhandClient } from './dockhand-client';
 import { NpmClient } from './npm-client';
-import { processContainer, parseBookmarks, buildDomainName, findProxyHostByDomain, validateBaseDomain, validateGeneratedDomain, isDomainCoveredByCertificate, extractDomainFromUrl } from './utils';
+import { PeekapingClient } from './peekaping-client';
+import { processContainer, parseBookmarks, buildDomainName, findProxyHostByDomain, validateBaseDomain, validateGeneratedDomain, isDomainCoveredByCertificate, extractDomainFromUrl, findNpmProxyHostForContainer } from './utils';
 import { extractPorts } from './utils';
-import type { CacheData, ProcessedContainer, NpmProxyHost, DockhandContainer, DockhandEnvironment } from './types';
+import type { CacheData, ProcessedContainer, NpmProxyHost, DockhandContainer, DockhandEnvironment, PeekapingMonitor, PeekapingCreateMonitorRequest } from './types';
 import type { NpmCreateProxyHostRequest, NpmCertificate } from './npm-types';
 
 export class CacheManager {
@@ -19,6 +20,7 @@ export class CacheManager {
   };
   private bookmarks: ProcessedContainer[];
   private npmClient: NpmClient | null = null;
+  private peekapingClient: PeekapingClient | null = null;
   private isRefreshing: boolean = false;
   private debounceTimer: Timer | null = null;
   private pendingRefreshCount: number = 0;
@@ -30,19 +32,38 @@ export class CacheManager {
   private npmDefaultAccessListId: number | null = null;
   private npmCertificateDomains: string[] = []; // Cached certificate domains
   private autoCreatedDomains: Map<string, string> = new Map(); // containerId → domain mapping
+  
+  // Peekaping auto-creation configuration
+  private peekapingNotificationIds: string[] = [];
+  private peekapingDefaultInterval: number = 60;
+  private peekapingDefaultTimeout: number = 16;
+  private peekapingDefaultMaxRetries: number = 3;
+  private autoCreatedMonitors: Map<string, string> = new Map(); // containerId → monitorId mapping
 
   constructor(
     npmClient?: NpmClient,
     npmAutoCreateDomain?: string,
     npmCertificateId?: number,
     npmPublicAccessListId?: number,
-    npmDefaultAccessListId?: number
+    npmDefaultAccessListId?: number,
+    peekapingClient?: PeekapingClient,
+    peekapingNotificationIds?: string[],
+    peekapingDefaultInterval?: number,
+    peekapingDefaultTimeout?: number,
+    peekapingDefaultMaxRetries?: number
   ) {
     // Parse bookmarks once on initialization
     this.bookmarks = parseBookmarks();
     this.npmClient = npmClient || null;
     this.npmPublicAccessListId = npmPublicAccessListId || null;
     this.npmDefaultAccessListId = npmDefaultAccessListId || null;
+    
+    // Initialize Peekaping client
+    this.peekapingClient = peekapingClient || null;
+    this.peekapingNotificationIds = peekapingNotificationIds || [];
+    this.peekapingDefaultInterval = peekapingDefaultInterval || 60;
+    this.peekapingDefaultTimeout = peekapingDefaultTimeout || 16;
+    this.peekapingDefaultMaxRetries = peekapingDefaultMaxRetries || 3;
 
     // Validate NPM auto-creation configuration
     if (npmAutoCreateDomain && npmCertificateId !== undefined && npmCertificateId !== null) {
@@ -336,6 +357,183 @@ export class CacheManager {
   }
 
   /**
+   * Automatically create Peekaping monitors for containers
+   * Called during cache refresh when Peekaping client is enabled
+   */
+  private async autoCreateMonitors(
+    containersWithEnv: Array<{ container: DockhandContainer; env: DockhandEnvironment }>,
+    npmProxyHosts: NpmProxyHost[]
+  ): Promise<void> {
+    // Check if Peekaping client is configured
+    if (!this.peekapingClient) {
+      return; // Peekaping not configured
+    }
+
+    console.log('🔍 Checking for Peekaping monitors to auto-create...');
+
+    let createdCount = 0;
+    let skippedCount = 0;
+
+    // Fetch existing monitors
+    let existingMonitors: PeekapingMonitor[] = [];
+    try {
+      existingMonitors = await this.peekapingClient.fetchMonitors();
+      console.log(`✅ Fetched ${existingMonitors.length} existing Peekaping monitor(s)`);
+    } catch (error) {
+      console.error('⚠️  Failed to fetch Peekaping monitors:', error);
+      return; // Can't proceed without knowing what monitors exist
+    }
+
+    for (const { container, env } of containersWithEnv) {
+      // Only process running containers
+      if (container.state !== 'running') {
+        continue;
+      }
+
+      // Skip if monitor-disable label is set
+      if (container.labels?.['dockhand-tavern.monitor-disable'] === 'true') {
+        console.log(`ℹ️  Skipping monitor creation for "${container.name}" (monitor-disable label set)`);
+        continue;
+      }
+
+      // Skip if dashboard-disable label is set (for backward compatibility)
+      if (container.labels?.['dockhand-tavern.disable'] === 'true') {
+        console.log(`ℹ️  Skipping monitor creation for "${container.name}" (disable label set)`);
+        continue;
+      }
+
+      // Determine monitor URL and protocol
+      let monitorUrl: string;
+      let protocol: 'https' | 'http';
+      let urlSource: 'npm-proxy' | 'custom-url' | 'local-ip';
+
+      // Priority 1: NPM proxy host with domain
+      const npmHost = findNpmProxyHostForContainer(container, env, npmProxyHosts);
+      if (npmHost && npmHost.domain_names.length > 0) {
+        protocol = 'https';
+        monitorUrl = `https://${npmHost.domain_names[0]}`;
+        urlSource = 'npm-proxy';
+      }
+      // Priority 2: Custom URL label
+      else if (container.labels?.['dockhand-tavern.url']) {
+        const customUrl = container.labels['dockhand-tavern.url'];
+        protocol = customUrl.startsWith('https://') ? 'https' : 'http';
+        monitorUrl = customUrl;
+        urlSource = 'custom-url';
+      }
+      // Priority 3: Local IP:port
+      else {
+        const ports = extractPorts(container.ports);
+        if (ports.length === 0) {
+          console.log(`ℹ️  Skipping monitor creation for "${container.name}" (no exposed ports)`);
+          continue;
+        }
+        protocol = 'http';
+        monitorUrl = `http://${env.publicIp}:${ports[0]}`;
+        urlSource = 'local-ip';
+      }
+
+      // Determine monitor name (use display name logic from processContainer)
+      const displayName = 
+        container.labels?.['dockhand-tavern.name'] || 
+        container.labels?.['com.docker.compose.service'] || 
+        container.name;
+
+      // Check if monitor already exists
+      // We check by BOTH name AND URL to prevent duplicates
+      // This is stricter than checking just one or the other
+      const existingMonitor = existingMonitors.find(monitor => {
+        // Check if both name and URL match
+        const nameMatches = monitor.name === displayName;
+        
+        let urlMatches = false;
+        try {
+          const config = JSON.parse(monitor.config || '{}');
+          urlMatches = config.url === monitorUrl;
+        } catch (e) {
+          // Ignore parse errors
+        }
+        
+        // Consider it a duplicate if EITHER name OR URL matches
+        // This prevents both renamed duplicates and URL duplicates
+        return nameMatches || urlMatches;
+      });
+
+      if (existingMonitor) {
+        let matchReason = '';
+        try {
+          const config = JSON.parse(existingMonitor.config || '{}');
+          if (existingMonitor.name === displayName && config.url === monitorUrl) {
+            matchReason = 'name and URL match';
+          } else if (existingMonitor.name === displayName) {
+            matchReason = 'name matches';
+          } else {
+            matchReason = 'URL matches';
+          }
+        } catch (e) {
+          matchReason = 'name matches';
+        }
+        
+        console.log(`ℹ️  Monitor "${displayName}" already exists (${matchReason}, ID: ${existingMonitor.id})`);
+        skippedCount++;
+        
+        // Track the existing monitor for this container
+        this.autoCreatedMonitors.set(container.id, existingMonitor.id);
+        continue;
+      }
+
+      // Create new monitor
+      const monitorRequest: PeekapingCreateMonitorRequest = {
+        name: displayName,
+        type: 'http',
+        notification_ids: this.peekapingNotificationIds,
+        config: JSON.stringify({
+          url: monitorUrl,
+          method: 'GET',
+          encoding: 'json',
+          authMethod: 'none',
+          accepted_statuscodes: ['2XX'],
+          headers: '{ "Content-Type": "application/json" }',
+          body: '',
+          max_redirects: 10,
+          check_cert_expiry: false,
+          ignore_tls_errors: false,
+        }),
+        active: true,
+        interval: this.peekapingDefaultInterval,
+        timeout: this.peekapingDefaultTimeout,
+        max_retries: this.peekapingDefaultMaxRetries,
+        retry_interval: this.peekapingDefaultInterval,
+      };
+
+      try {
+        console.log(`📊 Creating Peekaping monitor`);
+        console.log(`   Container: ${container.name}`);
+        console.log(`   Monitor name: ${displayName}`);
+        console.log(`   URL: ${monitorUrl} (${urlSource})`);
+        console.log(`   Protocol: ${protocol}`);
+        console.log(`   Interval: ${this.peekapingDefaultInterval}s`);
+
+        const createdMonitor = await this.peekapingClient.createMonitor(monitorRequest);
+        console.log(`✅ Created Peekaping monitor: ${displayName} (ID: ${createdMonitor.id})`);
+        createdCount++;
+
+        // Track the auto-created monitor for this container
+        this.autoCreatedMonitors.set(container.id, createdMonitor.id);
+
+        // Add to existing monitors list so subsequent checks see it
+        existingMonitors.push(createdMonitor);
+      } catch (error) {
+        console.error(`❌ Failed to create Peekaping monitor for ${displayName}:`, error);
+      }
+    }
+
+    if (createdCount > 0 || skippedCount > 0) {
+      console.log(`✅ Peekaping monitor auto-creation complete: ${createdCount} created, ${skippedCount} skipped`);
+    }
+  }
+
+  /**
    * Refresh cache from Dockhand API (and optionally NPM)
    * This is the actual refresh logic (called by refreshDebounced)
    */
@@ -343,8 +541,9 @@ export class CacheManager {
     try {
       console.log('Refreshing cache from Dockhand...');
 
-      // Clear auto-created domains map (will be rebuilt during this refresh)
+      // Clear auto-created domains and monitors maps (will be rebuilt during this refresh)
       this.autoCreatedDomains.clear();
+      this.autoCreatedMonitors.clear();
 
       // 1. Fetch NPM proxy hosts (if NPM client available)
       let npmProxyHosts: NpmProxyHost[] = [];
@@ -380,7 +579,10 @@ export class CacheManager {
       // 4. Auto-create NPM proxy hosts (if enabled)
       await this.autoCreateProxyHosts(allRawContainers, npmProxyHosts);
 
-      // 5. Process containers for display
+      // 5. Auto-create Peekaping monitors (if enabled)
+      await this.autoCreateMonitors(allRawContainers, npmProxyHosts);
+
+      // 6. Process containers for display
       const allContainers: ProcessedContainer[] = [];
 
       for (const item of allRawContainers) {

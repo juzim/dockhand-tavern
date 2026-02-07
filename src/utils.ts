@@ -564,6 +564,33 @@ export function findProxyHostByDomain(
 }
 
 /**
+ * Find NPM proxy host for a container
+ * Matches by environment IP and container's first exposed port
+ * Returns the proxy host if found, undefined otherwise
+ */
+export function findNpmProxyHostForContainer(
+  container: DockhandContainer,
+  env: DockhandEnvironment,
+  npmProxyHosts: NpmProxyHost[]
+): NpmProxyHost | undefined {
+  // Extract ports from container
+  const ports = extractPorts(container.ports);
+  if (ports.length === 0) {
+    return undefined;
+  }
+
+  // Get first exposed port
+  const firstPort = ports[0];
+  const targetIp = env.publicIp;
+
+  // Find matching NPM proxy host
+  return npmProxyHosts.find(host =>
+    host.forward_host === targetIp &&
+    host.forward_port === firstPort
+  );
+}
+
+/**
  * Parse BOOKMARKS environment variable into ProcessedContainer objects
  * Expected format: [{"name":"Foo","url":"https://example.com","icon":"optional","group":"optional"}]
  */

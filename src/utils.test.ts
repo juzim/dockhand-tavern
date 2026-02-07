@@ -9,8 +9,10 @@ import {
   buildDomainName,
   validateBaseDomain,
   validateGeneratedDomain,
-  isDomainCoveredByCertificate
+  isDomainCoveredByCertificate,
+  findNpmProxyHostForContainer
 } from './utils';
+import type { DockhandContainer, DockhandEnvironment, NpmProxyHost } from './types';
 
 describe('extractDomainFromUrl', () => {
   describe('Valid HTTPS domains', () => {
@@ -199,5 +201,157 @@ describe('isDomainCoveredByCertificate', () => {
 
   test('case insensitive matching', () => {
     expect(isDomainCoveredByCertificate('App.Ltrg.De', ['*.ltrg.de'])).toBe(true);
+  });
+});
+
+describe('findNpmProxyHostForContainer', () => {
+  const mockEnv: DockhandEnvironment = {
+    id: 1,
+    name: 'prod',
+    type: 'production',
+    publicIp: '192.168.1.100',
+  };
+
+  const mockContainer: DockhandContainer = {
+    id: 'container-123',
+    name: 'web-app',
+    image: 'nginx:latest',
+    state: 'running',
+    status: 'Up 5 minutes',
+    created: Date.now(),
+    ports: [
+      {
+        IP: '0.0.0.0',
+        PrivatePort: 80,
+        PublicPort: 8080,
+        Type: 'tcp',
+      },
+    ],
+    networks: {},
+    restartCount: 0,
+    mounts: [],
+    labels: {},
+    command: '',
+    systemContainer: null,
+  };
+
+  const mockNpmProxyHosts: NpmProxyHost[] = [
+    {
+      id: 1,
+      created_on: '2024-01-01',
+      modified_on: '2024-01-01',
+      owner_user_id: 1,
+      domain_names: ['app.example.com'],
+      forward_scheme: 'http',
+      forward_host: '192.168.1.100',
+      forward_port: 8080,
+      access_list_id: 0,
+      certificate_id: 1,
+      ssl_forced: true,
+      caching_enabled: false,
+      block_exploits: true,
+      advanced_config: '',
+      meta: {},
+      allow_websocket_upgrade: true,
+      http2_support: true,
+      hsts_enabled: true,
+      hsts_subdomains: false,
+      enabled: true,
+    },
+    {
+      id: 2,
+      created_on: '2024-01-01',
+      modified_on: '2024-01-01',
+      owner_user_id: 1,
+      domain_names: ['api.example.com'],
+      forward_scheme: 'http',
+      forward_host: '192.168.1.100',
+      forward_port: 3000,
+      access_list_id: 0,
+      certificate_id: 1,
+      ssl_forced: true,
+      caching_enabled: false,
+      block_exploits: true,
+      advanced_config: '',
+      meta: {},
+      allow_websocket_upgrade: true,
+      http2_support: true,
+      hsts_enabled: true,
+      hsts_subdomains: false,
+      enabled: true,
+    },
+  ];
+
+  test('finds NPM proxy host when IP and port match', () => {
+    const result = findNpmProxyHostForContainer(mockContainer, mockEnv, mockNpmProxyHosts);
+    expect(result).not.toBeNull();
+    expect(result?.domain_names[0]).toBe('app.example.com');
+    expect(result?.forward_port).toBe(8080);
+  });
+
+  test('returns undefined when no matching proxy host exists', () => {
+    const containerWithDifferentPort = {
+      ...mockContainer,
+      ports: [
+        {
+          IP: '0.0.0.0',
+          PrivatePort: 80,
+          PublicPort: 9999,
+          Type: 'tcp',
+        },
+      ],
+    };
+
+    const result = findNpmProxyHostForContainer(containerWithDifferentPort, mockEnv, mockNpmProxyHosts);
+    expect(result).toBeUndefined();
+  });
+
+  test('returns undefined when container has no exposed ports', () => {
+    const containerWithoutPorts = {
+      ...mockContainer,
+      ports: [],
+    };
+
+    const result = findNpmProxyHostForContainer(containerWithoutPorts, mockEnv, mockNpmProxyHosts);
+    expect(result).toBeUndefined();
+  });
+
+  test('returns undefined when NPM proxy hosts array is empty', () => {
+    const result = findNpmProxyHostForContainer(mockContainer, mockEnv, []);
+    expect(result).toBeUndefined();
+  });
+
+  test('matches by environment IP and first exposed port', () => {
+    const containerWithMultiplePorts = {
+      ...mockContainer,
+      ports: [
+        {
+          IP: '0.0.0.0',
+          PrivatePort: 80,
+          PublicPort: 8080,
+          Type: 'tcp',
+        },
+        {
+          IP: '0.0.0.0',
+          PrivatePort: 443,
+          PublicPort: 8443,
+          Type: 'tcp',
+        },
+      ],
+    };
+
+    const result = findNpmProxyHostForContainer(containerWithMultiplePorts, mockEnv, mockNpmProxyHosts);
+    expect(result).not.toBeNull();
+    expect(result?.forward_port).toBe(8080); // Matches first port
+  });
+
+  test('returns undefined when IP does not match', () => {
+    const differentEnv = {
+      ...mockEnv,
+      publicIp: '192.168.1.200',
+    };
+
+    const result = findNpmProxyHostForContainer(mockContainer, differentEnv, mockNpmProxyHosts);
+    expect(result).toBeUndefined();
   });
 });

@@ -6,6 +6,7 @@
 import { Elysia } from 'elysia';
 import { DockhandClient } from './dockhand-client';
 import { NpmClient } from './npm-client';
+import { PeekapingClient } from './peekaping-client';
 import { CacheManager } from './cache';
 import { renderDashboard } from './template';
 
@@ -25,6 +26,24 @@ const NPM_AUTO_CREATE_DOMAIN = process.env.NPM_AUTO_CREATE_DOMAIN;
 const NPM_CERTIFICATE_ID = process.env.NPM_CERTIFICATE_ID ? parseInt(process.env.NPM_CERTIFICATE_ID, 10) : undefined;
 const NPM_PUBLIC_ACCESS_LIST_ID = process.env.NPM_PUBLIC_ACCESS_LIST_ID ? parseInt(process.env.NPM_PUBLIC_ACCESS_LIST_ID, 10) : undefined;
 const NPM_DEFAULT_ACCESS_LIST_ID = process.env.NPM_DEFAULT_ACCESS_LIST_ID ? parseInt(process.env.NPM_DEFAULT_ACCESS_LIST_ID, 10) : undefined;
+
+// Peekaping environment variables (optional)
+const PEEKAPING_URL = process.env.PEEKAPING_URL;
+const PEEKAPING_API_KEY = process.env.PEEKAPING_API_KEY;
+
+// Peekaping auto-creation environment variables (optional)
+const PEEKAPING_NOTIFICATION_IDS = process.env.PEEKAPING_NOTIFICATION_IDS 
+  ? JSON.parse(process.env.PEEKAPING_NOTIFICATION_IDS) 
+  : [];
+const PEEKAPING_DEFAULT_INTERVAL = process.env.PEEKAPING_DEFAULT_INTERVAL 
+  ? parseInt(process.env.PEEKAPING_DEFAULT_INTERVAL, 10) 
+  : 60;
+const PEEKAPING_DEFAULT_TIMEOUT = process.env.PEEKAPING_DEFAULT_TIMEOUT 
+  ? parseInt(process.env.PEEKAPING_DEFAULT_TIMEOUT, 10) 
+  : 16;
+const PEEKAPING_DEFAULT_MAX_RETRIES = process.env.PEEKAPING_DEFAULT_MAX_RETRIES 
+  ? parseInt(process.env.PEEKAPING_DEFAULT_MAX_RETRIES, 10) 
+  : 3;
 
 // Validate configuration
 if (!DOCKHAND_PASSWORD) {
@@ -79,6 +98,38 @@ if (NPM_URL && NPM_EMAIL && NPM_PASSWORD) {
   console.log('   NPM integration: disabled (credentials not provided)');
 }
 
+// Initialize Peekaping client if credentials provided
+let peekapingClient: PeekapingClient | undefined;
+if (PEEKAPING_URL && PEEKAPING_API_KEY) {
+  console.log(`   Peekaping URL: ${PEEKAPING_URL}`);
+  peekapingClient = new PeekapingClient(PEEKAPING_URL, PEEKAPING_API_KEY);
+  
+  // Test Peekaping connection
+  try {
+    const peekapingConnected = await peekapingClient.testConnection();
+    if (peekapingConnected) {
+      console.log('✅ Peekaping connection successful');
+      
+      if (PEEKAPING_NOTIFICATION_IDS.length > 0) {
+        console.log(`   Notification IDs: ${PEEKAPING_NOTIFICATION_IDS.join(', ')}`);
+      } else {
+        console.log(`   Notification IDs: none (monitors will have no notifications)`);
+      }
+      console.log(`   Default interval: ${PEEKAPING_DEFAULT_INTERVAL}s`);
+      console.log(`   Default timeout: ${PEEKAPING_DEFAULT_TIMEOUT}s`);
+      console.log(`   Default max retries: ${PEEKAPING_DEFAULT_MAX_RETRIES}`);
+    } else {
+      console.warn('⚠️  Peekaping connection failed - will continue without Peekaping integration');
+      peekapingClient = undefined;
+    }
+  } catch (error) {
+    console.warn('⚠️  Peekaping connection test failed:', error);
+    peekapingClient = undefined;
+  }
+} else {
+  console.log('   Peekaping integration: disabled (credentials not provided)');
+}
+
 // Initialize Dockhand client and cache
 const client = new DockhandClient(DOCKHAND_URL, DOCKHAND_USERNAME, DOCKHAND_PASSWORD);
 const cache = new CacheManager(
@@ -86,7 +137,12 @@ const cache = new CacheManager(
   NPM_AUTO_CREATE_DOMAIN,
   NPM_CERTIFICATE_ID,
   NPM_PUBLIC_ACCESS_LIST_ID,
-  NPM_DEFAULT_ACCESS_LIST_ID
+  NPM_DEFAULT_ACCESS_LIST_ID,
+  peekapingClient,
+  PEEKAPING_NOTIFICATION_IDS,
+  PEEKAPING_DEFAULT_INTERVAL,
+  PEEKAPING_DEFAULT_TIMEOUT,
+  PEEKAPING_DEFAULT_MAX_RETRIES
 );
 
 // Initial cache population

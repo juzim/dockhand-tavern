@@ -23,7 +23,8 @@ Written with opencode and claude 4.5 Sonnet.
 - **Icon support** - Automatic icons from [selfh.st/icons](https://selfh.st/icons)
 - **Bookmarks** - Services can be added manually
 - **Filters** - Services can be searched and filtered by dockhand environment
-- **nginx-proxy-manager support** - (optional) Matches IPs against proxy hosts to show domain instead if IPs
+- **nginx-proxy-manager support** - (optional) Automatically creates proxy hosts for services
+- **Peekaping integration** - (optional) Automatically creates uptime monitors for services
 
 ## Quick Start
 
@@ -280,6 +281,89 @@ NPM auto-creation includes comprehensive validation to prevent invalid proxy hos
 - **No Duplicates**: The same domain will never be created twice
 - **Error Handling**: Failed creations are logged but don't stop other containers from being processed
 - **Validation Enforcement**: Validation cannot be disabled - invalid configurations will prevent auto-creation
+
+## Peekaping Integration (Uptime Monitoring)
+
+Dockhand Tavern can automatically create uptime monitors in [Peekaping](https://github.com/peekaping/peekaping) for your deployed services.
+
+### Configuration
+
+```bash
+# Required for Peekaping integration
+PEEKAPING_URL=http://localhost:8034
+PEEKAPING_API_KEY=your-api-key-here
+
+# Optional: Notification configuration
+PEEKAPING_NOTIFICATION_IDS='["notification-id-1"]'  # JSON array
+PEEKAPING_DEFAULT_INTERVAL=60      # Check interval (seconds, min: 20)
+PEEKAPING_DEFAULT_TIMEOUT=16       # Timeout (seconds, min: 16)
+PEEKAPING_DEFAULT_MAX_RETRIES=3    # Max retries before marking down
+```
+
+### How It Works
+
+1. **Monitor Creation**: When a container is deployed, a monitor is automatically created in Peekaping
+2. **URL Selection Priority**:
+   - If NPM proxy host exists → monitors `https://domain.com` (external URL)
+   - If custom URL label exists → monitors that URL
+   - Otherwise → monitors `http://{publicIp}:{port}` (internal IP)
+3. **Protocol**: HTTPS if NPM proxied or custom URL is HTTPS, otherwise HTTP
+4. **Monitor Name**: Uses container's display name (from `dockhand-tavern.name` label or service name)
+
+### URL Selection Examples
+
+```yaml
+# Example 1: Container with NPM proxy host
+services:
+  webapp:
+    image: nginx
+    ports:
+      - "8080:80"
+# Monitor created: https://webapp.example.com (if NPM proxy exists)
+# Otherwise: http://192.168.1.100:8080
+
+# Example 2: Custom URL label (takes priority)
+services:
+  api:
+    image: node
+    labels:
+      dockhand-tavern.url: "https://api.example.com"
+# Monitor created: https://api.example.com
+
+# Example 3: Internal service (no proxy, no custom URL)
+services:
+  db:
+    image: postgres
+    ports:
+      - "5432:5432"
+# Monitor created: http://192.168.1.100:5432
+```
+
+### Labels
+
+- **`dockhand-tavern.monitor-disable: "true"`** - Skip Peekaping monitor creation for this container
+
+```yaml
+services:
+  internal-db:
+    image: postgres
+    labels:
+      dockhand-tavern.monitor-disable: "true"  # Don't monitor this service
+```
+
+### Getting Your API Key
+
+1. Log in to your Peekaping instance
+2. Go to Settings → API Keys
+3. Create a new API key
+4. Copy the key and set it as `PEEKAPING_API_KEY`
+
+### Behavior
+
+- **Existing Monitors**: If a monitor with the same name already exists, it will NOT be modified
+- **No Duplicates**: The same monitor will never be created twice
+- **Error Handling**: Failed creations are logged but don't stop other containers from being processed
+- **Notifications**: If no notification IDs are configured, monitors are created without notifications
 
 ## Deployment
 
